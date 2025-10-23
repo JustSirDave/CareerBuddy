@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "buddyai-backend"
+version = "0.1.0"
+description = "Career Buddy AI — backend"
+authors = ["BuddyAI"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.115.0"
+uvicorn = {extras = ["standard"], version = "^0.30.0"}
+python-dotenv = "^1.0.1"
+httpx = "^0.27.0"
+redis = "^5.0.7"
+loguru = "^0.7.2"
+
+# For later phases (already safe to install)
+SQLAlchemy = "^2.0.29"
+psycopg = {version = "^3.1.19", extras = ["binary"]}
+celery = "^5.4.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.8.0"
+flake8 = "^7.1.0"
+isort = "^5.13.2"
+mypy = "^1.10.0"
+pytest = "^8.2.0"
