@@ -1,0 +1,22 @@
+# never ship secrets or local configs
+.env
+.env.*
+node_modules
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.sqlite
+dist/
+build/
+venv/
+.venv/
+.git
+.gitignore
+.ngrok2
+# big folders you don't need in the image
+templates/
+rules/
+infra/
+README.md
