@@ -1,5 +1,5 @@
 import hmac, hashlib
-from config import settings
+from app.config import settings
 
 HEADER = "X-Hub-Signature-256"
 

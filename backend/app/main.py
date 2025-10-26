@@ -1,14 +1,15 @@
 import uuid
 import time
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from loguru import logger
+from sqlalchemy import text
 
 from app.routers.webhook import router as whatsapp_router
 from app.config import settings
-
+from app.db import get_db
 
 app = FastAPI(title="CareerBuddy Backend")
 
@@ -29,6 +30,7 @@ class RequestLogMiddleware(BaseHTTPMiddleware):
         response.headers["X-Request-ID"] = rid
         return response
 
+
 # WhatsApp verify endpoint must parse hub.* params
 @app.get("/webhooks/whatsapp")
 async def whatsapp_verify(request: Request):
@@ -39,6 +41,7 @@ async def whatsapp_verify(request: Request):
     if mode == "subscribe" and token == settings.wa_verify_token and challenge:
         return int(challenge)
     raise HTTPException(status_code=403, detail="Verification failed")
+
 
 async def check_env():
     required = [
@@ -51,6 +54,12 @@ async def check_env():
     if missing:
         # log clearly; you can also raise RuntimeError to stop
         print(f"[BOOT] Missing required env: {', '.join(missing)}")
+
+
+@app.get("/health/db")
+def health_db(db = Depends(get_db)):
+    db.execute(text("SELECT 1"))
+    return {"db": "ok"}
 
 @app.api_route("/webhook", methods=["GET", "POST"])
 async def noop():

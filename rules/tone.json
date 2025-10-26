@@ -1,0 +1,4 @@
+{
+  "cover_letter": { "max_sentence_len": 28, "contractions": "allow", "pronouns": "light" },
+  "resume": { "neutral": true }
+}
