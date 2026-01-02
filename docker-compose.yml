@@ -37,6 +37,23 @@ services:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
 
+  waha:
+    image: devlikeapro/waha:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - WHATSAPP_HOOK_URL=http://api:8000/webhooks/whatsapp
+      - WHATSAPP_HOOK_EVENTS=message
+      - WAHA_API_KEY=${WAHA_API_KEY:-}
+      - WHATSAPP_START_SESSION=default
+      - WHATSAPP_RESTART_ALL_SESSIONS=True
+      - WAHA_PRINT_QR=True
+    volumes:
+      - waha_sessions:/app/.sessions
+      - waha_auth:/app/.wwebjs_auth
+      - waha_cache:/app/.wwebjs_cache
+    restart: unless-stopped
+
   worker:
     build:
       context: ./backend
@@ -53,3 +70,6 @@ services:
 
 volumes:
   pgdata:
+  waha_sessions:
+  waha_auth:
+  waha_cache:
