@@ -13,23 +13,23 @@ from app.models import Job
 
 def render_resume(job: Job) -> bytes:
     """
-    Generate ATS-compliant DOCX resume from job data.
-    Follows rules from rules/ats.json:
-    - No tables or icons
-    - Standard fonts (Arial)
-    - Simple formatting
-    - Dates in MMM YYYY format
+    Generate professional DOCX resume with table-based layout.
+    Uses same layout as CV template:
+    - Centered header (name, title, contact details with icons)
+    - Two-column table structure: labels on left, content on right
+    - Horizontal line separators between sections
+    - Skills in two columns at the bottom
     """
     answers = job.answers or {}
     doc = Document()
 
-    # Set document margins (1 inch all around)
+    # Set document margins
     sections = doc.sections
     for section in sections:
         section.top_margin = Inches(0.5)
         section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.75)
-        section.right_margin = Inches(0.75)
+        section.left_margin = Inches(0.7)
+        section.right_margin = Inches(0.7)
 
     # Get data
     basics = answers.get('basics', {})
@@ -38,128 +38,362 @@ def render_resume(job: Job) -> bytes:
     experiences = answers.get('experiences', [])
     education = answers.get('education', [])
     projects = answers.get('projects', [])
+    profiles = answers.get('profiles', [])
+    references = answers.get('references', [])
 
     # ==================== HEADER ====================
     name = basics.get('name', 'Your Name')
     title = basics.get('title', 'Professional Title')
 
-    # Name (Large, Bold)
+    # Name (Large, Bold, Centered)
     name_para = doc.add_paragraph()
     name_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     name_run = name_para.add_run(name)
-    name_run.font.size = Pt(18)
+    name_run.font.size = Pt(20)
     name_run.font.bold = True
     name_run.font.name = 'Arial'
+    name_para.space_after = Pt(2)
 
-    # Title
+    # Title (Centered, smaller)
     title_para = doc.add_paragraph()
     title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title_run = title_para.add_run(title)
-    title_run.font.size = Pt(12)
+    title_run.font.size = Pt(11)
     title_run.font.name = 'Arial'
+    title_para.space_after = Pt(6)
 
-    # Contact Info
+    # Contact Info - Single line with icons
     contact_parts = []
-    if basics.get('email'):
-        contact_parts.append(basics['email'])
-    if basics.get('phone'):
-        contact_parts.append(basics['phone'])
     if basics.get('location'):
-        contact_parts.append(basics['location'])
+        contact_parts.append(f"📍 {basics['location']}")
+    if basics.get('phone'):
+        contact_parts.append(f"☎ {basics['phone']}")
+    if basics.get('email'):
+        contact_parts.append(f"✉ {basics['email']}")
 
     if contact_parts:
         contact_para = doc.add_paragraph()
         contact_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        contact_run = contact_para.add_run(' | '.join(contact_parts))
-        contact_run.font.size = Pt(10)
+        contact_run = contact_para.add_run('  '.join(contact_parts))
+        contact_run.font.size = Pt(9)
         contact_run.font.name = 'Arial'
+        contact_para.space_after = Pt(8)
 
-    # Add spacing after header
-    doc.add_paragraph()
+    # Add horizontal line after header
+    _add_horizontal_line(doc)
+    doc.add_paragraph().space_after = Pt(4)
+
+    # ==================== MAIN CONTENT TABLE ====================
+    from docx.oxml.shared import OxmlElement
+    from docx.oxml.ns import qn
+    
+    # Calculate number of rows needed
+    num_rows = 0
+    if profiles: num_rows += 1
+    if summary: num_rows += 1
+    if experiences: num_rows += 1
+    if education: num_rows += 1
+    if projects: num_rows += 1
+    if references: num_rows += 1
+    if skills: num_rows += 1
+    
+    if num_rows == 0:
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer.getvalue()
+    
+    table = doc.add_table(rows=num_rows, cols=2)
+    table.style = 'Table Grid'
+    
+    # Set column widths
+    for row in table.rows:
+        row.cells[0].width = Inches(1.2)
+        row.cells[1].width = Inches(5.3)
+    
+    current_row = 0
+
+    # ==================== PROFILES ====================
+    if profiles:
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
+        
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('Profiles')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
+        
+        content_para = content_cell.paragraphs[0]
+        profile_texts = []
+        for profile in profiles:
+            platform = profile.get('platform', 'Profile')
+            url = profile.get('url', '')
+            if platform and url:
+                if 'linkedin' in platform.lower():
+                    profile_texts.append(f"🔗 {platform}")
+                elif 'facebook' in platform.lower():
+                    profile_texts.append(f"📘 {platform}")
+                else:
+                    profile_texts.append(f"🔗 {platform}")
+        
+        if profile_texts:
+            content_run = content_para.add_run('     '.join(profile_texts))
+            content_run.font.size = Pt(10)
+            content_run.font.name = 'Arial'
+        
+        _add_table_row_border(table.rows[current_row])
+        current_row += 1
 
     # ==================== SUMMARY ====================
     if summary:
-        _add_section_heading(doc, 'PROFESSIONAL SUMMARY')
-        summary_para = doc.add_paragraph(summary)
-        _set_body_font(summary_para)
-        doc.add_paragraph()  # Spacing
-
-    # ==================== SKILLS ====================
-    if skills:
-        _add_section_heading(doc, 'SKILLS')
-        skills_text = ', '.join(skills)
-        skills_para = doc.add_paragraph(skills_text)
-        _set_body_font(skills_para)
-        doc.add_paragraph()  # Spacing
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
+        
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('Summary')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
+        
+        content_para = content_cell.paragraphs[0]
+        content_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        content_run = content_para.add_run(summary)
+        content_run.font.size = Pt(10)
+        content_run.font.name = 'Arial'
+        
+        _add_table_row_border(table.rows[current_row])
+        current_row += 1
 
     # ==================== EXPERIENCE ====================
     if experiences:
-        _add_section_heading(doc, 'PROFESSIONAL EXPERIENCE')
-
-        for i, exp in enumerate(experiences):
-            # Job Title & Company
-            title_line = doc.add_paragraph()
-            title_run = title_line.add_run(exp.get('role', 'Role'))
-            title_run.font.bold = True
-            title_run.font.size = Pt(11)
-            title_run.font.name = 'Arial'
-
-            # Company, Location | Dates
-            info_parts = []
-            if exp.get('company'):
-                info_parts.append(exp['company'])
-            if exp.get('location'):
-                info_parts.append(exp['location'])
-
-            info_line = ' | '.join(info_parts)
-
-            # Add dates
-            date_part = ''
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
+        
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('Experience')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
+        
+        content_cell._element.remove(content_cell.paragraphs[0]._element)
+        
+        for idx, exp in enumerate(experiences):
+            exp_header = content_cell.add_paragraph()
+            exp_header.paragraph_format.space_after = Pt(0)
+            
+            company = exp.get('company', 'Company Name')
+            company_run = exp_header.add_run(company)
+            company_run.font.bold = True
+            company_run.font.size = Pt(11)
+            company_run.font.name = 'Arial'
+            
+            date_str = ''
             if exp.get('start'):
-                date_part = exp['start']
+                date_str = exp['start']
                 if exp.get('end'):
-                    date_part += f" - {exp['end']}"
-
-            if date_part:
-                info_line += f" | {date_part}"
-
-            if info_line:
-                info_para = doc.add_paragraph(info_line)
-                _set_body_font(info_para)
-
-            # Bullets
+                    date_str += f" - {exp['end']}"
+            
+            if date_str:
+                from docx.enum.text import WD_TAB_ALIGNMENT
+                tab_stops = exp_header.paragraph_format.tab_stops
+                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
+                exp_header.add_run('\t')
+                date_run = exp_header.add_run(date_str)
+                date_run.font.size = Pt(10)
+                date_run.font.name = 'Arial'
+            
+            role_para = content_cell.add_paragraph()
+            role_para.paragraph_format.space_after = Pt(2)
+            
+            role = exp.get('role', 'Job Title')
+            role_run = role_para.add_run(role)
+            role_run.font.size = Pt(10)
+            role_run.font.name = 'Arial'
+            
+            location = exp.get('location', '')
+            if location:
+                from docx.enum.text import WD_TAB_ALIGNMENT
+                tab_stops = role_para.paragraph_format.tab_stops
+                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
+                role_para.add_run('\t')
+                loc_run = role_para.add_run(location)
+                loc_run.font.size = Pt(10)
+                loc_run.font.name = 'Arial'
+            
             bullets = exp.get('bullets', [])
-            for bullet in bullets:
-                bullet_para = doc.add_paragraph(bullet, style='List Bullet')
-                _set_body_font(bullet_para)
-
-            # Add spacing between experiences (except last one)
-            if i < len(experiences) - 1:
-                doc.add_paragraph()
-
-        doc.add_paragraph()  # Section spacing
+            if bullets:
+                desc_para = content_cell.add_paragraph()
+                desc_para.paragraph_format.space_after = Pt(6)
+                desc_text = ' '.join(bullets) if bullets else ''
+                desc_run = desc_para.add_run(desc_text)
+                desc_run.font.size = Pt(10)
+                desc_run.font.name = 'Arial'
+            
+            if idx < len(experiences) - 1:
+                content_cell.add_paragraph().space_after = Pt(4)
+        
+        _add_table_row_border(table.rows[current_row])
+        current_row += 1
 
     # ==================== EDUCATION ====================
     if education:
-        _add_section_heading(doc, 'EDUCATION')
-
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
+        
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('Education')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
+        
+        content_cell._element.remove(content_cell.paragraphs[0]._element)
+        
         for edu in education:
-            edu_details = edu.get('details', '')
-            if edu_details:
-                edu_para = doc.add_paragraph(edu_details)
-                _set_body_font(edu_para)
-
-        doc.add_paragraph()  # Spacing
+            edu_header = content_cell.add_paragraph()
+            edu_header.paragraph_format.space_after = Pt(0)
+            
+            institution = edu.get('institution', 'Institution Name')
+            inst_run = edu_header.add_run(institution)
+            inst_run.font.bold = False
+            inst_run.font.size = Pt(10)
+            inst_run.font.name = 'Arial'
+            
+            years = edu.get('years', '')
+            if years:
+                from docx.enum.text import WD_TAB_ALIGNMENT
+                tab_stops = edu_header.paragraph_format.tab_stops
+                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
+                edu_header.add_run('\t')
+                years_run = edu_header.add_run(years)
+                years_run.font.size = Pt(10)
+                years_run.font.name = 'Arial'
+            
+            degree_para = content_cell.add_paragraph()
+            degree_para.paragraph_format.space_after = Pt(4)
+            
+            degree = edu.get('degree', '')
+            degree_run = degree_para.add_run(degree)
+            degree_run.font.size = Pt(10)
+            degree_run.font.name = 'Arial'
+            
+            degree_type = edu.get('degree_type', '')
+            if degree_type:
+                from docx.enum.text import WD_TAB_ALIGNMENT
+                tab_stops = degree_para.paragraph_format.tab_stops
+                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
+                degree_para.add_run('\t')
+                type_run = degree_para.add_run(degree_type)
+                type_run.font.size = Pt(10)
+                type_run.font.name = 'Arial'
+        
+        _add_table_row_border(table.rows[current_row])
+        current_row += 1
 
     # ==================== PROJECTS ====================
     if projects:
-        _add_section_heading(doc, 'PROJECTS & CERTIFICATIONS')
-
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
+        
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('Projects')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
+        
+        content_cell._element.remove(content_cell.paragraphs[0]._element)
+        
         for proj in projects:
+            proj_para = content_cell.add_paragraph()
+            proj_para.paragraph_format.space_after = Pt(4)
             proj_details = proj.get('details', '')
             if proj_details:
-                proj_para = doc.add_paragraph(proj_details, style='List Bullet')
-                _set_body_font(proj_para)
+                proj_run = proj_para.add_run(proj_details)
+                proj_run.font.size = Pt(10)
+                proj_run.font.name = 'Arial'
+        
+        _add_table_row_border(table.rows[current_row])
+        current_row += 1
+
+    # ==================== REFERENCES ====================
+    if references:
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
+        
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('References')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
+        
+        content_cell._element.remove(content_cell.paragraphs[0]._element)
+        
+        for ref in references:
+            name_para = content_cell.add_paragraph()
+            name_para.paragraph_format.space_after = Pt(0)
+            name_run = name_para.add_run(ref.get('name', 'Reference Name'))
+            name_run.font.bold = True
+            name_run.font.size = Pt(10)
+            name_run.font.name = 'Arial'
+            
+            ref_title = ref.get('title', '')
+            if ref_title:
+                title_para = content_cell.add_paragraph(ref_title)
+                title_para.paragraph_format.space_after = Pt(0)
+                for run in title_para.runs:
+                    run.font.size = Pt(10)
+                    run.font.name = 'Arial'
+            
+            ref_org = ref.get('organization', '')
+            if ref_org:
+                org_para = content_cell.add_paragraph(ref_org)
+                org_para.paragraph_format.space_after = Pt(6)
+                for run in org_para.runs:
+                    run.font.size = Pt(10)
+                    run.font.name = 'Arial'
+        
+        _add_table_row_border(table.rows[current_row])
+        current_row += 1
+
+    # ==================== SKILLS ====================
+    if skills:
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
+        
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('Skills')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
+        
+        content_cell._element.remove(content_cell.paragraphs[0]._element)
+        
+        skills_para = content_cell.add_paragraph()
+        from docx.enum.text import WD_TAB_ALIGNMENT
+        tab_stops = skills_para.paragraph_format.tab_stops
+        tab_stops.add_tab_stop(Inches(2.65), WD_TAB_ALIGNMENT.LEFT)
+        
+        mid = (len(skills) + 1) // 2
+        col1 = skills[:mid]
+        col2 = skills[mid:]
+        
+        for i in range(max(len(col1), len(col2))):
+            skill_line = content_cell.add_paragraph()
+            skill_line.paragraph_format.space_after = Pt(2)
+            
+            if i < len(col1):
+                skill1_run = skill_line.add_run(col1[i])
+                skill1_run.font.size = Pt(10)
+                skill1_run.font.name = 'Arial'
+            
+            skill_line.add_run('\t')
+            
+            if i < len(col2):
+                skill2_run = skill_line.add_run(col2[i])
+                skill2_run.font.size = Pt(10)
+                skill2_run.font.name = 'Arial'
+        
+        _add_table_row_border(table.rows[current_row])
 
     # Save to bytes
     buffer = BytesIO()
