@@ -436,32 +436,14 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
                     "After payment, return here and type *paid* to continue.")
 
         if t.lower() == "paid":
-            payment_ref = answers.get("payment_reference")
-            if not payment_ref:
-                return "No payment found. Please type *pay* to get your payment link first."
-
-            # Verify payment
-            verification = await payments.verify_payment(payment_ref)
-
-            if "error" in verification or verification.get("status") != "success":
-                return ("⏳ Payment not confirmed yet. Please complete your payment and try again.\n\n"
-                        "Type *paid* after completing payment.")
-
-            # Payment successful - record it and continue to finalize
+            # Gateway waived: mark as paid and continue
             user = db.query(User).filter(User.id == job.user_id).first()
-            payments.record_payment(
-                db, user.id, payment_ref,
-                verification.get("amount"),
-                verification.get("metadata", {}),
-                raw_payload=verification,
-            )
+            payments.record_waived_payment(db, user.id, answers.get("target_role", "Unknown Role"))
 
-            # Clear payment reference and advance to finalize
             answers.pop("payment_reference", None)
             answers["paid_generation"] = True
             _advance(db, job, answers, "finalize")
 
-            # Continue to finalize step
             step = "finalize"
             t = ""  # Reset text to proceed with finalization
 
@@ -497,34 +479,16 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
 
         # Check if user claims to have paid
         if t.lower() == "paid":
-            payment_ref = answers.get("payment_reference")
-            if not payment_ref:
-                return "No payment found. Please type *pay* to get your payment link first."
-
-            # Verify payment
-            verification = await payments.verify_payment(payment_ref)
-
-            if "error" in verification or verification.get("status") != "success":
-                return ("⏳ Payment not confirmed yet. Please complete your payment and try again.\n\n"
-                        "Type *paid* after completing payment.")
-
-            # Payment successful - record it
+            # Gateway waived: mark as paid and continue
             user = db.query(User).filter(User.id == job.user_id).first()
-            payments.record_payment(
-                db, user.id, payment_ref,
-                verification.get("amount"),
-                verification.get("metadata", {}),
-                raw_payload=verification,
-            )
+            payments.record_waived_payment(db, user.id, target_role)
 
-            # Clear payment reference and proceed with generation
             answers.pop("payment_reference", None)
             answers["paid_generation"] = True
             job.answers = answers
             flag_modified(job, "answers")
             db.commit()
 
-            # Continue to rendering below
             t = ""
 
         # Check generation limits before proceeding
@@ -727,27 +691,14 @@ Reply *yes* to generate your improved document, or */reset* to start over."""
                     "After payment, return here and type *paid* to continue.")
 
         if t.lower() == "paid":
-            payment_ref = answers.get("payment_reference")
-            if not payment_ref:
-                return "No payment found. Please type *pay* to get your payment link first."
-
-            verification = await payments.verify_payment(payment_ref)
-            if "error" in verification or verification.get("status") != "success":
-                return ("⏳ Payment not confirmed yet. Please complete your payment and try again.\n\n"
-                        "Type *paid* after completing payment.")
-
+            # Waive payment for now
             user = db.query(User).filter(User.id == job.user_id).first()
-            payments.record_payment(
-                db, user.id, payment_ref,
-                verification.get("amount"),
-                verification.get("metadata", {}),
-                raw_payload=verification,
-            )
+            payments.record_waived_payment(db, user.id, answers.get("target_role", "Revamp"))
 
             answers.pop("payment_reference", None)
             answers["paid_generation"] = True
             _advance(db, job, answers, "preview")
-            return "✅ Payment confirmed! Reply *yes* to generate your improved document."
+            return "✅ Payment waived! Reply *yes* to generate your improved document."
 
         return (f"🎯 *Payment Required*\n\nEach document costs ₦{payments.PAID_GENERATION_PRICE:,}.\n"
                 "Reply *pay* to get your payment link, or */reset* to cancel.")
@@ -870,28 +821,15 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
                     "After payment, return here and type *paid* to continue.")
 
         if t.lower() == "paid":
-            payment_ref = answers.get("payment_reference")
-            if not payment_ref:
-                return "No payment found. Please type *pay* to get your payment link first."
-
-            verification = await payments.verify_payment(payment_ref)
-            if "error" in verification or verification.get("status") != "success":
-                return ("⏳ Payment not confirmed yet. Please complete your payment and try again.\n\n"
-                        "Type *paid* after completing payment.")
-
+            # Waive payment for now
             user = db.query(User).filter(User.id == job.user_id).first()
-            payments.record_payment(
-                db, user.id, payment_ref,
-                verification.get("amount"),
-                verification.get("metadata", {}),
-                raw_payload=verification,
-            )
+            payments.record_waived_payment(db, user.id, answers.get("cover_role", "Cover Letter"))
 
             answers.pop("payment_reference", None)
             answers["paid_generation"] = True
             _advance(db, job, answers, "preview")
             preview_text = _format_cover_preview(answers)
-            return f"✅ Payment confirmed!\n\n{preview_text}\n\nReply *yes* to generate your cover letter."
+            return f"✅ Payment waived!\n\n{preview_text}\n\nReply *yes* to generate your cover letter."
 
         return (f"🎯 *Payment Required*\n\nEach document costs ₦{payments.PAID_GENERATION_PRICE:,}.\n"
                 "Reply *pay* to get your payment link, or */reset* to cancel.")

@@ -215,3 +215,24 @@ def record_payment(db: Session, user_id: str, reference: str, amount: int, metad
     except Exception as e:
         logger.error(f"[payments] Failed to record payment: {e}")
         db.rollback()
+
+
+def record_waived_payment(db: Session, user_id: str, role: str, reference: str | None = None):
+    """
+    Record a waived (no-charge) payment placeholder while gateway is bypassed.
+    """
+    try:
+        payment = Payment(
+            user_id=user_id,
+            reference=reference or f"waived-{user_id}",
+            amount=0,
+            status="waived",
+            payment_metadata={"role": role, "note": "waived"},
+            raw_webhook=None,
+        )
+        db.add(payment)
+        db.commit()
+        logger.info(f"[payments] Recorded waived payment for user {user_id}, role={role}")
+    except Exception as e:
+        logger.error(f"[payments] Failed to record waived payment: {e}")
+        db.rollback()

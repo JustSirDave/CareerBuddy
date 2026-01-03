@@ -172,12 +172,295 @@ def render_resume(job: Job) -> bytes:
 
 def render_cv(job: Job) -> bytes:
     """
-    Generate CV (same as resume for now, can be customized later)
-    CV typically includes more detail: publications, research, etc.
+    Generate CV with exact layout from reference template.
+    Single-page, clean, professional document with:
+    - Centered header (name, title, contact details on one line)
+    - Profiles section (horizontal layout)
+    - Summary paragraph
+    - Experience with right-aligned dates
+    - Education
+    - References
+    - Skills in two columns
     """
-    # For now, use same renderer as resume
-    # TODO: Add CV-specific sections (Publications, Research, etc.)
-    return render_resume(job)
+    answers = job.answers or {}
+    doc = Document()
+
+    # Set document margins (narrow margins for single-page)
+    sections = doc.sections
+    for section in sections:
+        section.top_margin = Inches(0.5)
+        section.bottom_margin = Inches(0.5)
+        section.left_margin = Inches(0.7)
+        section.right_margin = Inches(0.7)
+
+    # Get data
+    basics = answers.get('basics', {})
+    profiles = answers.get('profiles', [])
+    summary = answers.get('summary', '')
+    skills = answers.get('skills', [])
+    experiences = answers.get('experiences', [])
+    education = answers.get('education', [])
+    references = answers.get('references', [])
+
+    # ==================== HEADER ====================
+    name = basics.get('name', 'Your Name')
+    title = basics.get('title', 'Professional Title')
+
+    # Name (Large, Bold, Centered)
+    name_para = doc.add_paragraph()
+    name_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    name_run = name_para.add_run(name)
+    name_run.font.size = Pt(20)
+    name_run.font.bold = True
+    name_run.font.name = 'Arial'
+    name_para.space_after = Pt(2)
+
+    # Title (Centered, smaller)
+    title_para = doc.add_paragraph()
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_run = title_para.add_run(title)
+    title_run.font.size = Pt(11)
+    title_run.font.name = 'Arial'
+    title_para.space_after = Pt(2)
+
+    # Contact Info - Single line with separators
+    contact_parts = []
+    if basics.get('location'):
+        contact_parts.append(f"📍 {basics['location']}")
+    if basics.get('phone'):
+        contact_parts.append(f"📞 {basics['phone']}")
+    if basics.get('email'):
+        contact_parts.append(f"✉ {basics['email']}")
+
+    if contact_parts:
+        contact_para = doc.add_paragraph()
+        contact_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        contact_run = contact_para.add_run('     '.join(contact_parts))
+        contact_run.font.size = Pt(9)
+        contact_run.font.name = 'Arial'
+        contact_para.space_after = Pt(6)
+
+    # ==================== PROFILES ====================
+    if profiles:
+        _add_cv_section_heading(doc, 'Profiles')
+        
+        profiles_para = doc.add_paragraph()
+        profiles_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+        profile_texts = []
+        for profile in profiles:
+            platform = profile.get('platform', 'Profile')
+            url = profile.get('url', '')
+            if platform and url:
+                profile_texts.append(f"🔗 {platform}: {url}")
+        
+        if profile_texts:
+            profile_run = profiles_para.add_run('     '.join(profile_texts))
+            profile_run.font.size = Pt(10)
+            profile_run.font.name = 'Arial'
+        
+        doc.add_paragraph().space_after = Pt(4)
+
+    # ==================== SUMMARY ====================
+    if summary:
+        _add_cv_section_heading(doc, 'Summary')
+        summary_para = doc.add_paragraph(summary)
+        summary_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        _set_body_font(summary_para)
+        doc.add_paragraph().space_after = Pt(4)
+
+    # ==================== EXPERIENCE ====================
+    if experiences:
+        _add_cv_section_heading(doc, 'Experience')
+
+        for exp in experiences:
+            # Company name (bold, left) and dates (right) on same line
+            exp_header = doc.add_paragraph()
+            exp_header.paragraph_format.space_after = Pt(0)
+            
+            # Company name (bold)
+            company = exp.get('company', 'Company Name')
+            company_run = exp_header.add_run(company)
+            company_run.font.bold = True
+            company_run.font.size = Pt(11)
+            company_run.font.name = 'Arial'
+            
+            # Add dates on the same line (right-aligned)
+            date_str = ''
+            if exp.get('start'):
+                date_str = exp['start']
+                if exp.get('end'):
+                    date_str += f" - {exp['end']}"
+            
+            if date_str:
+                # Add tab stop for right alignment
+                from docx.shared import Pt as PT
+                from docx.enum.text import WD_TAB_ALIGNMENT
+                tab_stops = exp_header.paragraph_format.tab_stops
+                tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT)
+                
+                exp_header.add_run('\t')
+                date_run = exp_header.add_run(date_str)
+                date_run.font.size = Pt(10)
+                date_run.font.name = 'Arial'
+            
+            # Job title (left) and location (right) on next line
+            role_para = doc.add_paragraph()
+            role_para.paragraph_format.space_after = Pt(0)
+            
+            role = exp.get('role', 'Job Title')
+            role_run = role_para.add_run(role)
+            role_run.font.size = Pt(10)
+            role_run.font.name = 'Arial'
+            
+            location = exp.get('location', '')
+            if location:
+                from docx.enum.text import WD_TAB_ALIGNMENT
+                tab_stops = role_para.paragraph_format.tab_stops
+                tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT)
+                
+                role_para.add_run('\t')
+                loc_run = role_para.add_run(location)
+                loc_run.font.size = Pt(10)
+                loc_run.font.name = 'Arial'
+            
+            # Bullets/description
+            bullets = exp.get('bullets', [])
+            if bullets:
+                for bullet in bullets:
+                    bullet_para = doc.add_paragraph()
+                    bullet_para.paragraph_format.left_indent = Inches(0)
+                    bullet_para.paragraph_format.space_after = Pt(2)
+                    bullet_run = bullet_para.add_run(bullet)
+                    bullet_run.font.size = Pt(10)
+                    bullet_run.font.name = 'Arial'
+            
+            # Spacing between experiences
+            doc.add_paragraph().space_after = Pt(6)
+
+    # ==================== EDUCATION ====================
+    if education:
+        _add_cv_section_heading(doc, 'Education')
+
+        for edu in education:
+            # Institution name (bold, left) and years (right)
+            edu_header = doc.add_paragraph()
+            edu_header.paragraph_format.space_after = Pt(0)
+            
+            institution = edu.get('institution', 'Institution Name')
+            inst_run = edu_header.add_run(institution)
+            inst_run.font.bold = True
+            inst_run.font.size = Pt(11)
+            inst_run.font.name = 'Arial'
+            
+            # Years on right
+            years = edu.get('years', '')
+            if years:
+                from docx.enum.text import WD_TAB_ALIGNMENT
+                tab_stops = edu_header.paragraph_format.tab_stops
+                tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT)
+                
+                edu_header.add_run('\t')
+                years_run = edu_header.add_run(years)
+                years_run.font.size = Pt(10)
+                years_run.font.name = 'Arial'
+            
+            # Degree (left) and degree type (right)
+            degree_para = doc.add_paragraph()
+            degree_para.paragraph_format.space_after = Pt(2)
+            
+            degree = edu.get('degree', '')
+            degree_run = degree_para.add_run(degree)
+            degree_run.font.size = Pt(10)
+            degree_run.font.name = 'Arial'
+            
+            degree_type = edu.get('degree_type', '')
+            if degree_type:
+                from docx.enum.text import WD_TAB_ALIGNMENT
+                tab_stops = degree_para.paragraph_format.tab_stops
+                tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT)
+                
+                degree_para.add_run('\t')
+                type_run = degree_para.add_run(degree_type)
+                type_run.font.size = Pt(10)
+                type_run.font.name = 'Arial'
+        
+        doc.add_paragraph().space_after = Pt(4)
+
+    # ==================== REFERENCES ====================
+    if references:
+        _add_cv_section_heading(doc, 'References')
+
+        for ref in references:
+            # Name (bold)
+            ref_name = ref.get('name', 'Reference Name')
+            name_para = doc.add_paragraph()
+            name_para.paragraph_format.space_after = Pt(0)
+            name_run = name_para.add_run(ref_name)
+            name_run.font.bold = True
+            name_run.font.size = Pt(10)
+            name_run.font.name = 'Arial'
+            
+            # Title/role
+            ref_title = ref.get('title', '')
+            if ref_title:
+                title_para = doc.add_paragraph(ref_title)
+                title_para.paragraph_format.space_after = Pt(0)
+                _set_body_font(title_para)
+            
+            # Organization
+            ref_org = ref.get('organization', '')
+            if ref_org:
+                org_para = doc.add_paragraph(ref_org)
+                org_para.paragraph_format.space_after = Pt(6)
+                _set_body_font(org_para)
+        
+        doc.add_paragraph().space_after = Pt(4)
+
+    # ==================== SKILLS ====================
+    if skills:
+        from docx.oxml.shared import OxmlElement
+        from docx.oxml.ns import qn
+        
+        _add_cv_section_heading(doc, 'Skills')
+        
+        # Create two-column layout using table (hidden borders)
+        num_skills = len(skills)
+        rows_needed = (num_skills + 1) // 2  # Ceiling division
+        
+        table = doc.add_table(rows=rows_needed, cols=2)
+        table.style = 'Table Grid'
+        
+        # Remove borders
+        for row in table.rows:
+            for cell in row.cells:
+                # Set cell border to none
+                tcPr = cell._element.get_or_add_tcPr()
+                tcBorders = OxmlElement('w:tcBorders')
+                for border_name in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
+                    border = OxmlElement(f'w:{border_name}')
+                    border.set(qn('w:val'), 'none')
+                    tcBorders.append(border)
+                tcPr.append(tcBorders)
+        
+        # Fill in skills
+        for idx, skill in enumerate(skills):
+            row_idx = idx // 2
+            col_idx = idx % 2
+            cell = table.rows[row_idx].cells[col_idx]
+            cell.text = skill
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    run.font.size = Pt(10)
+                    run.font.name = 'Arial'
+
+    # Save to bytes
+    buffer = BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+
+    logger.info(f"[renderer] Generated CV DOCX for job.id={job.id}")
+    return buffer.getvalue()
 
 
 def render_cover_letter(job: Job) -> bytes:
@@ -316,6 +599,32 @@ def _add_section_heading(doc: Document, text: str):
     bottom = OxmlElement('w:bottom')
     bottom.set(qn('w:val'), 'single')
     bottom.set(qn('w:sz'), '6')  # Border width
+    bottom.set(qn('w:space'), '1')
+    bottom.set(qn('w:color'), '000000')
+    pBdr.append(bottom)
+    pPr.append(pBdr)
+
+
+def _add_cv_section_heading(doc: Document, text: str):
+    """Add a CV section heading with horizontal line separator"""
+    heading = doc.add_paragraph()
+    heading.paragraph_format.space_before = Pt(6)
+    heading.paragraph_format.space_after = Pt(4)
+    heading_run = heading.add_run(text)
+    heading_run.font.bold = True
+    heading_run.font.size = Pt(11)
+    heading_run.font.name = 'Arial'
+    heading_run.font.color.rgb = RGBColor(0, 0, 0)
+
+    # Add bottom border (horizontal line)
+    from docx.oxml.shared import OxmlElement
+    from docx.oxml.ns import qn
+
+    pPr = heading._element.get_or_add_pPr()
+    pBdr = OxmlElement('w:pBdr')
+    bottom = OxmlElement('w:bottom')
+    bottom.set(qn('w:val'), 'single')
+    bottom.set(qn('w:sz'), '4')  # Thinner border
     bottom.set(qn('w:space'), '1')
     bottom.set(qn('w:color'), '000000')
     pBdr.append(bottom)

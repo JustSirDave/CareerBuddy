@@ -14,10 +14,18 @@ def _get_headers():
 
 
 def _format_phone(wa_id: str) -> str:
-    """Format phone number for WAHA (expects format: 1234567890@c.us)."""
-    if "@c.us" not in wa_id:
-        return f"{wa_id}@c.us"
-    return wa_id
+    """
+    Format phone number for WAHA.
+    Handles multiple WhatsApp ID formats:
+    - @c.us (regular WhatsApp numbers)
+    - @lid (Linked ID / Business accounts)
+    - @s.whatsapp.net (alternative format)
+    """
+    # If already has a WhatsApp suffix, return as-is
+    if "@c.us" in wa_id or "@lid" in wa_id or "@s.whatsapp.net" in wa_id:
+        return wa_id
+    # Otherwise, add standard @c.us suffix
+    return f"{wa_id}@c.us"
 
 
 async def reply_text(wa_id: str, text: str):
