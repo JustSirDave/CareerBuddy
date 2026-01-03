@@ -172,20 +172,17 @@ def render_resume(job: Job) -> bytes:
 
 def render_cv(job: Job) -> bytes:
     """
-    Generate CV with exact layout from reference template.
-    Single-page, clean, professional document with:
-    - Centered header (name, title, contact details on one line)
-    - Profiles section (horizontal layout)
-    - Summary paragraph
-    - Experience with right-aligned dates
-    - Education
-    - References
-    - Skills in two columns
+    Generate CV with exact layout matching reference template.
+    Uses table-based layout with:
+    - Centered header (name, title, contact details with icons)
+    - Two-column table structure: labels on left, content on right
+    - Horizontal line separators between sections
+    - Skills in two columns at the bottom
     """
     answers = job.answers or {}
     doc = Document()
 
-    # Set document margins (narrow margins for single-page)
+    # Set document margins
     sections = doc.sections
     for section in sections:
         section.top_margin = Inches(0.5)
@@ -221,71 +218,145 @@ def render_cv(job: Job) -> bytes:
     title_run = title_para.add_run(title)
     title_run.font.size = Pt(11)
     title_run.font.name = 'Arial'
-    title_para.space_after = Pt(2)
+    title_para.space_after = Pt(6)
 
-    # Contact Info - Single line with separators
+    # Contact Info - Single line with icons
     contact_parts = []
     if basics.get('location'):
         contact_parts.append(f"📍 {basics['location']}")
     if basics.get('phone'):
-        contact_parts.append(f"📞 {basics['phone']}")
+        contact_parts.append(f"☎ {basics['phone']}")
     if basics.get('email'):
         contact_parts.append(f"✉ {basics['email']}")
 
     if contact_parts:
         contact_para = doc.add_paragraph()
         contact_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        contact_run = contact_para.add_run('     '.join(contact_parts))
+        contact_run = contact_para.add_run('  '.join(contact_parts))
         contact_run.font.size = Pt(9)
         contact_run.font.name = 'Arial'
-        contact_para.space_after = Pt(6)
+        contact_para.space_after = Pt(8)
+
+    # Add horizontal line after header
+    _add_horizontal_line(doc)
+    doc.add_paragraph().space_after = Pt(4)
+
+    # ==================== MAIN CONTENT TABLE ====================
+    # Create table with 2 columns: labels (left) and content (right)
+    from docx.oxml.shared import OxmlElement
+    from docx.oxml.ns import qn
+    
+    # Calculate number of rows needed
+    num_rows = 0
+    if profiles: num_rows += 1
+    if summary: num_rows += 1
+    if experiences: num_rows += 1
+    if education: num_rows += 1
+    if references: num_rows += 1
+    if skills: num_rows += 1
+    
+    if num_rows == 0:
+        # No content, just return empty doc
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+        return buffer.getvalue()
+    
+    table = doc.add_table(rows=num_rows, cols=2)
+    table.style = 'Table Grid'
+    
+    # Set column widths: narrow for labels, wide for content
+    for row in table.rows:
+        row.cells[0].width = Inches(1.2)
+        row.cells[1].width = Inches(5.3)
+    
+    current_row = 0
 
     # ==================== PROFILES ====================
     if profiles:
-        _add_cv_section_heading(doc, 'Profiles')
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
         
-        profiles_para = doc.add_paragraph()
-        profiles_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        # Label
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('Profiles')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
         
+        # Content
+        content_para = content_cell.paragraphs[0]
         profile_texts = []
         for profile in profiles:
             platform = profile.get('platform', 'Profile')
             url = profile.get('url', '')
             if platform and url:
-                profile_texts.append(f"🔗 {platform}: {url}")
+                if 'linkedin' in platform.lower():
+                    profile_texts.append(f"🔗 {platform}")
+                elif 'facebook' in platform.lower():
+                    profile_texts.append(f"📘 {platform}")
+                else:
+                    profile_texts.append(f"🔗 {platform}")
         
         if profile_texts:
-            profile_run = profiles_para.add_run('     '.join(profile_texts))
-            profile_run.font.size = Pt(10)
-            profile_run.font.name = 'Arial'
+            content_run = content_para.add_run('     '.join(profile_texts))
+            content_run.font.size = Pt(10)
+            content_run.font.name = 'Arial'
         
-        doc.add_paragraph().space_after = Pt(4)
+        # Add horizontal line to this row
+        _add_table_row_border(table.rows[current_row])
+        current_row += 1
 
     # ==================== SUMMARY ====================
     if summary:
-        _add_cv_section_heading(doc, 'Summary')
-        summary_para = doc.add_paragraph(summary)
-        summary_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        _set_body_font(summary_para)
-        doc.add_paragraph().space_after = Pt(4)
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
+        
+        # Label
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('Summary')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
+        
+        # Content
+        content_para = content_cell.paragraphs[0]
+        content_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        content_run = content_para.add_run(summary)
+        content_run.font.size = Pt(10)
+        content_run.font.name = 'Arial'
+        
+        # Add horizontal line
+        _add_table_row_border(table.rows[current_row])
+        current_row += 1
 
     # ==================== EXPERIENCE ====================
     if experiences:
-        _add_cv_section_heading(doc, 'Experience')
-
-        for exp in experiences:
-            # Company name (bold, left) and dates (right) on same line
-            exp_header = doc.add_paragraph()
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
+        
+        # Label
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('Experience')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
+        
+        # Content - clear default paragraph
+        content_cell._element.remove(content_cell.paragraphs[0]._element)
+        
+        for idx, exp in enumerate(experiences):
+            # Company name (bold) and dates on same line
+            exp_header = content_cell.add_paragraph()
             exp_header.paragraph_format.space_after = Pt(0)
             
-            # Company name (bold)
             company = exp.get('company', 'Company Name')
             company_run = exp_header.add_run(company)
             company_run.font.bold = True
             company_run.font.size = Pt(11)
             company_run.font.name = 'Arial'
             
-            # Add dates on the same line (right-aligned)
+            # Add dates on right
             date_str = ''
             if exp.get('start'):
                 date_str = exp['start']
@@ -293,20 +364,17 @@ def render_cv(job: Job) -> bytes:
                     date_str += f" - {exp['end']}"
             
             if date_str:
-                # Add tab stop for right alignment
-                from docx.shared import Pt as PT
                 from docx.enum.text import WD_TAB_ALIGNMENT
                 tab_stops = exp_header.paragraph_format.tab_stops
-                tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT)
-                
+                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
                 exp_header.add_run('\t')
                 date_run = exp_header.add_run(date_str)
                 date_run.font.size = Pt(10)
                 date_run.font.name = 'Arial'
             
-            # Job title (left) and location (right) on next line
-            role_para = doc.add_paragraph()
-            role_para.paragraph_format.space_after = Pt(0)
+            # Job title and location
+            role_para = content_cell.add_paragraph()
+            role_para.paragraph_format.space_after = Pt(2)
             
             role = exp.get('role', 'Job Title')
             role_run = role_para.add_run(role)
@@ -317,57 +385,69 @@ def render_cv(job: Job) -> bytes:
             if location:
                 from docx.enum.text import WD_TAB_ALIGNMENT
                 tab_stops = role_para.paragraph_format.tab_stops
-                tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT)
-                
+                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
                 role_para.add_run('\t')
                 loc_run = role_para.add_run(location)
                 loc_run.font.size = Pt(10)
                 loc_run.font.name = 'Arial'
             
-            # Bullets/description
+            # Description/bullets
             bullets = exp.get('bullets', [])
             if bullets:
-                for bullet in bullets:
-                    bullet_para = doc.add_paragraph()
-                    bullet_para.paragraph_format.left_indent = Inches(0)
-                    bullet_para.paragraph_format.space_after = Pt(2)
-                    bullet_run = bullet_para.add_run(bullet)
-                    bullet_run.font.size = Pt(10)
-                    bullet_run.font.name = 'Arial'
+                desc_para = content_cell.add_paragraph()
+                desc_para.paragraph_format.space_after = Pt(6)
+                desc_text = ' '.join(bullets) if bullets else ''
+                desc_run = desc_para.add_run(desc_text)
+                desc_run.font.size = Pt(10)
+                desc_run.font.name = 'Arial'
             
-            # Spacing between experiences
-            doc.add_paragraph().space_after = Pt(6)
+            # Add spacing between experiences
+            if idx < len(experiences) - 1:
+                content_cell.add_paragraph().space_after = Pt(4)
+        
+        # Add horizontal line
+        _add_table_row_border(table.rows[current_row])
+        current_row += 1
 
     # ==================== EDUCATION ====================
     if education:
-        _add_cv_section_heading(doc, 'Education')
-
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
+        
+        # Label
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('Education')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
+        
+        # Content
+        content_cell._element.remove(content_cell.paragraphs[0]._element)
+        
         for edu in education:
-            # Institution name (bold, left) and years (right)
-            edu_header = doc.add_paragraph()
+            # Institution and years
+            edu_header = content_cell.add_paragraph()
             edu_header.paragraph_format.space_after = Pt(0)
             
             institution = edu.get('institution', 'Institution Name')
             inst_run = edu_header.add_run(institution)
-            inst_run.font.bold = True
-            inst_run.font.size = Pt(11)
+            inst_run.font.bold = False
+            inst_run.font.size = Pt(10)
             inst_run.font.name = 'Arial'
             
-            # Years on right
             years = edu.get('years', '')
             if years:
                 from docx.enum.text import WD_TAB_ALIGNMENT
                 tab_stops = edu_header.paragraph_format.tab_stops
-                tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT)
-                
+                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
                 edu_header.add_run('\t')
                 years_run = edu_header.add_run(years)
                 years_run.font.size = Pt(10)
                 years_run.font.name = 'Arial'
             
-            # Degree (left) and degree type (right)
-            degree_para = doc.add_paragraph()
-            degree_para.paragraph_format.space_after = Pt(2)
+            # Degree and type
+            degree_para = content_cell.add_paragraph()
+            degree_para.paragraph_format.space_after = Pt(4)
             
             degree = edu.get('degree', '')
             degree_run = degree_para.add_run(degree)
@@ -378,81 +458,110 @@ def render_cv(job: Job) -> bytes:
             if degree_type:
                 from docx.enum.text import WD_TAB_ALIGNMENT
                 tab_stops = degree_para.paragraph_format.tab_stops
-                tab_stops.add_tab_stop(Inches(6.0), WD_TAB_ALIGNMENT.RIGHT)
-                
+                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
                 degree_para.add_run('\t')
                 type_run = degree_para.add_run(degree_type)
                 type_run.font.size = Pt(10)
                 type_run.font.name = 'Arial'
         
-        doc.add_paragraph().space_after = Pt(4)
+        # Add horizontal line
+        _add_table_row_border(table.rows[current_row])
+        current_row += 1
 
     # ==================== REFERENCES ====================
     if references:
-        _add_cv_section_heading(doc, 'References')
-
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
+        
+        # Label
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('References')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
+        
+        # Content
+        content_cell._element.remove(content_cell.paragraphs[0]._element)
+        
         for ref in references:
             # Name (bold)
-            ref_name = ref.get('name', 'Reference Name')
-            name_para = doc.add_paragraph()
+            name_para = content_cell.add_paragraph()
             name_para.paragraph_format.space_after = Pt(0)
-            name_run = name_para.add_run(ref_name)
+            name_run = name_para.add_run(ref.get('name', 'Reference Name'))
             name_run.font.bold = True
             name_run.font.size = Pt(10)
             name_run.font.name = 'Arial'
             
-            # Title/role
+            # Title
             ref_title = ref.get('title', '')
             if ref_title:
-                title_para = doc.add_paragraph(ref_title)
+                title_para = content_cell.add_paragraph(ref_title)
                 title_para.paragraph_format.space_after = Pt(0)
-                _set_body_font(title_para)
+                for run in title_para.runs:
+                    run.font.size = Pt(10)
+                    run.font.name = 'Arial'
             
             # Organization
             ref_org = ref.get('organization', '')
             if ref_org:
-                org_para = doc.add_paragraph(ref_org)
+                org_para = content_cell.add_paragraph(ref_org)
                 org_para.paragraph_format.space_after = Pt(6)
-                _set_body_font(org_para)
+                for run in org_para.runs:
+                    run.font.size = Pt(10)
+                    run.font.name = 'Arial'
         
-        doc.add_paragraph().space_after = Pt(4)
+        # Add horizontal line
+        _add_table_row_border(table.rows[current_row])
+        current_row += 1
 
     # ==================== SKILLS ====================
     if skills:
-        from docx.oxml.shared import OxmlElement
-        from docx.oxml.ns import qn
+        label_cell = table.rows[current_row].cells[0]
+        content_cell = table.rows[current_row].cells[1]
         
-        _add_cv_section_heading(doc, 'Skills')
+        # Label
+        label_para = label_cell.paragraphs[0]
+        label_run = label_para.add_run('Skills')
+        label_run.font.bold = True
+        label_run.font.size = Pt(11)
+        label_run.font.name = 'Arial'
         
-        # Create two-column layout using table (hidden borders)
-        num_skills = len(skills)
-        rows_needed = (num_skills + 1) // 2  # Ceiling division
+        # Content - Two columns
+        content_cell._element.remove(content_cell.paragraphs[0]._element)
         
-        table = doc.add_table(rows=rows_needed, cols=2)
-        table.style = 'Table Grid'
+        # Create paragraph with tab stop for two-column layout
+        skills_para = content_cell.add_paragraph()
+        from docx.enum.text import WD_TAB_ALIGNMENT
+        tab_stops = skills_para.paragraph_format.tab_stops
+        tab_stops.add_tab_stop(Inches(2.65), WD_TAB_ALIGNMENT.LEFT)
         
-        # Remove borders
-        for row in table.rows:
-            for cell in row.cells:
-                # Set cell border to none
-                tcPr = cell._element.get_or_add_tcPr()
-                tcBorders = OxmlElement('w:tcBorders')
-                for border_name in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
-                    border = OxmlElement(f'w:{border_name}')
-                    border.set(qn('w:val'), 'none')
-                    tcBorders.append(border)
-                tcPr.append(tcBorders)
+        # Split skills into two columns
+        mid = (len(skills) + 1) // 2
+        col1 = skills[:mid]
+        col2 = skills[mid:]
         
-        # Fill in skills
-        for idx, skill in enumerate(skills):
-            row_idx = idx // 2
-            col_idx = idx % 2
-            cell = table.rows[row_idx].cells[col_idx]
-            cell.text = skill
-            for paragraph in cell.paragraphs:
-                for run in paragraph.runs:
-                    run.font.size = Pt(10)
-                    run.font.name = 'Arial'
+        # Layout skills in two columns
+        for i in range(max(len(col1), len(col2))):
+            skill_line = content_cell.add_paragraph()
+            skill_line.paragraph_format.space_after = Pt(2)
+            
+            # Column 1
+            if i < len(col1):
+                skill1_run = skill_line.add_run(col1[i])
+                skill1_run.font.size = Pt(10)
+                skill1_run.font.name = 'Arial'
+            
+            # Tab to column 2
+            skill_line.add_run('\t')
+            
+            # Column 2
+            if i < len(col2):
+                skill2_run = skill_line.add_run(col2[i])
+                skill2_run.font.size = Pt(10)
+                skill2_run.font.name = 'Arial'
+        
+        # Add horizontal line (last row)
+        _add_table_row_border(table.rows[current_row])
 
     # Save to bytes
     buffer = BytesIO()
@@ -636,3 +745,37 @@ def _set_body_font(paragraph):
     for run in paragraph.runs:
         run.font.name = 'Arial'
         run.font.size = Pt(10)
+
+
+def _add_horizontal_line(doc: Document):
+    """Add a horizontal line separator"""
+    from docx.oxml.shared import OxmlElement
+    from docx.oxml.ns import qn
+    
+    para = doc.add_paragraph()
+    pPr = para._element.get_or_add_pPr()
+    pBdr = OxmlElement('w:pBdr')
+    bottom = OxmlElement('w:bottom')
+    bottom.set(qn('w:val'), 'single')
+    bottom.set(qn('w:sz'), '6')
+    bottom.set(qn('w:space'), '1')
+    bottom.set(qn('w:color'), '000000')
+    pBdr.append(bottom)
+    pPr.append(pBdr)
+    para.paragraph_format.space_after = Pt(0)
+
+
+def _add_table_row_border(row):
+    """Add bottom border to a table row"""
+    from docx.oxml.shared import OxmlElement
+    from docx.oxml.ns import qn
+    
+    for cell in row.cells:
+        tcPr = cell._element.get_or_add_tcPr()
+        tcBorders = OxmlElement('w:tcBorders')
+        bottom = OxmlElement('w:bottom')
+        bottom.set(qn('w:val'), 'single')
+        bottom.set(qn('w:sz'), '4')
+        bottom.set(qn('w:color'), '000000')
+        tcBorders.append(bottom)
+        tcPr.append(tcBorders)
