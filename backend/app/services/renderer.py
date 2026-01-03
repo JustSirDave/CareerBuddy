@@ -106,6 +106,26 @@ def render_resume(job: Job) -> bytes:
     table = doc.add_table(rows=num_rows, cols=2)
     table.style = 'Table Grid'
     
+    # Remove all table borders (make them invisible)
+    from docx.oxml.shared import OxmlElement
+    from docx.oxml.ns import qn
+    
+    tbl = table._element
+    tblPr = tbl.tblPr
+    if tblPr is None:
+        tblPr = OxmlElement('w:tblPr')
+        tbl.insert(0, tblPr)
+    
+    tblBorders = OxmlElement('w:tblBorders')
+    for border_name in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
+        border = OxmlElement(f'w:{border_name}')
+        border.set(qn('w:val'), 'none')
+        border.set(qn('w:sz'), '0')
+        border.set(qn('w:space'), '0')
+        border.set(qn('w:color'), 'auto')
+        tblBorders.append(border)
+    tblPr.append(tblBorders)
+    
     # Set column widths
     for row in table.rows:
         row.cells[0].width = Inches(1.2)
@@ -498,6 +518,26 @@ def render_cv(job: Job) -> bytes:
     
     table = doc.add_table(rows=num_rows, cols=2)
     table.style = 'Table Grid'
+    
+    # Remove all table borders (make them invisible)
+    from docx.oxml.shared import OxmlElement
+    from docx.oxml.ns import qn
+    
+    tbl = table._element
+    tblPr = tbl.tblPr
+    if tblPr is None:
+        tblPr = OxmlElement('w:tblPr')
+        tbl.insert(0, tblPr)
+    
+    tblBorders = OxmlElement('w:tblBorders')
+    for border_name in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
+        border = OxmlElement(f'w:{border_name}')
+        border.set(qn('w:val'), 'none')
+        border.set(qn('w:sz'), '0')
+        border.set(qn('w:space'), '0')
+        border.set(qn('w:color'), 'auto')
+        tblBorders.append(border)
+    tblPr.append(tblBorders)
     
     # Set column widths: narrow for labels, wide for content
     for row in table.rows:
