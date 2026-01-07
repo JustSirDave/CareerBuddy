@@ -580,10 +580,8 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
             elif reason == "free_limit_reached":
                 # Set step to payment_required so user can't skip
                 _advance(db, job, answers, "payment_required")
-                return (f"🎯 *You've reached your free tier limit ({payments.FREE_TIER_LIMIT} documents)*\n\n"
-                        f"Each additional document costs ₦{payments.PAID_GENERATION_PRICE:,}.\n\n"
-                        "Ready to generate your document? Reply *pay* to get your payment link, "
-                        "or type */reset* to start over.")
+                # Return payment marker to trigger payment UI
+                return f"__PAYMENT_REQUIRED__|{target_role}|{payments.PAID_GENERATION_PRICE}"
             elif reason.startswith("max_per_role"):
                 _, role_name = reason.split("|")
                 return (f"⚠️ *Maximum generations reached for '{role_name}'*\n\n"

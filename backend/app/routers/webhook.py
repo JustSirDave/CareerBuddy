@@ -6,7 +6,7 @@ from loguru import logger
 from app.config import settings
 from app.services.idempotency import seen_or_mark
 from app.db import get_db
-from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action
+from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request
 from app.services.router import handle_inbound
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -69,6 +69,26 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
         if len(parts) == 3:
             _, job_id, filename = parts
             await send_document_to_user(chat_id, job_id, filename)
+        return {"ok": True}
+
+    # Check if payment is required
+    if reply and reply.startswith("__PAYMENT_REQUIRED__|"):
+        parts = reply.split("|")
+        if len(parts) == 3:
+            _, role, amount_str = parts
+            from app.services import payments
+            from app.models import User
+            
+            # Get user
+            user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
+            if user:
+                # Create payment link
+                payment_result = await payments.create_payment_link(user, role, int(amount_str))
+                
+                if payment_result.get("authorization_url"):
+                    await send_payment_request(chat_id, payment_result["authorization_url"], int(amount_str))
+                else:
+                    await reply_text(chat_id, "❌ *Payment Error*\n\nSorry, we couldn't generate your payment link. Please contact support or try again later.")
         return {"ok": True}
 
     if reply:
@@ -218,6 +238,17 @@ Ready to create? Type /start!"""
                 if reply:
                     await reply_text(chat_id, reply)
         
+        elif data == "payment_completed":
+            # User claims they've paid - check their payment status
+            await reply_text(chat_id, """✅ *Checking Payment Status...*
+
+Please wait while we verify your payment.
+
+If payment is confirmed, you'll be able to continue creating your document.
+
+_This may take a few moments._""")
+            # The actual payment verification happens via webhook
+            
         elif data == "cancel":
             await reply_text(chat_id, "❌ *Cancelled*\n\nNo problem! Type /start when you're ready to create a document.")
         
