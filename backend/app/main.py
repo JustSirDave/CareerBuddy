@@ -9,7 +9,7 @@ from starlette.requests import Request
 from loguru import logger
 from sqlalchemy import text
 
-from app.routers.webhook import router as whatsapp_router
+from app.routers.webhook import router as webhook_router
 from app.config import settings
 from app.db import get_db
 
@@ -30,14 +30,13 @@ class RequestLogMiddleware(BaseHTTPMiddleware):
 
 
 async def check_env():
+    """Check required environment variables on startup"""
     required = [
-        ("WAHA_URL", settings.waha_url),
-        ("WAHA_SESSION", settings.waha_session),
+        ("TELEGRAM_BOT_TOKEN", settings.telegram_bot_token),
     ]
     missing = [k for k, v in required if not v]
     if missing:
-        # log clearly; you can also raise RuntimeError to stop
-        print(f"[BOOT] Missing required env: {', '.join(missing)}")
+        logger.warning(f"[BOOT] Missing required env: {', '.join(missing)}")
 
 
 @app.get("/health/db")
@@ -81,4 +80,4 @@ async def download_file(job_id: str, filename: str):
 
 app.add_middleware(RequestLogMiddleware)
 
-app.include_router(whatsapp_router)
+app.include_router(webhook_router)

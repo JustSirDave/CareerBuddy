@@ -1,7 +1,8 @@
 from pydantic import BaseModel, EmailStr
 
 class UserCreate(BaseModel):
-    wa_id: str
+    telegram_user_id: str
+    telegram_username: str | None = None
     name: str | None = None
     email: EmailStr | None = None
     phone: str | None = None
@@ -9,7 +10,8 @@ class UserCreate(BaseModel):
 
 class UserOut(BaseModel):
     id: str
-    wa_id: str
+    telegram_user_id: str
+    telegram_username: str | None = None
     name: str | None = None
     email: str | None = None
     phone: str | None = None

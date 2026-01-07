@@ -30,6 +30,7 @@ env/
 # Output files
 backend/output/
 *.pdf
+*.docx
 
 # Database
 *.db
@@ -37,7 +38,12 @@ backend/output/
 
 # Logs
 *.log
+*-log.txt
 
 # Docker volumes data
 postgres_data/
 redis_data/
+
+# Temporary test files
+backend/test_cv_sample.docx
+1762953389621.pdf

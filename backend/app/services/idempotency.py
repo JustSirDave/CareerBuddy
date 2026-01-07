@@ -21,7 +21,7 @@ def seen_or_mark(key: str, ttl: int = 3600) -> bool:
         Check if a key has been seen before. If not, mark it.
 
         Args:
-            key: Unique identifier (e.g., WhatsApp message ID)
+            key: Unique identifier (e.g., Telegram message ID)
             ttl: Time-to-live in seconds (default: 1 hour)
 
         Returns:

@@ -22,8 +22,8 @@ def test_complete_flow():
     """Simulate complete resume creation flow."""
     db = Session()
 
-    # Test user WhatsApp ID
-    wa_id = "TEST_USER_12345@c.us"
+    # Test user Telegram ID
+    telegram_user_id = "123456789"
 
     print("\n" + "="*80)
     print("🧪 TESTING COMPLETE RESUME FLOW WITH AI")
@@ -31,9 +31,9 @@ def test_complete_flow():
 
     # Clean up any existing test data
     db.query(Job).filter(Job.user_id.in_(
-        db.query(User.id).filter(User.wa_id == wa_id)
+        db.query(User.id).filter(User.telegram_user_id == telegram_user_id)
     )).delete(synchronize_session=False)
-    db.query(User).filter(User.wa_id == wa_id).delete()
+    db.query(User).filter(User.telegram_user_id == telegram_user_id).delete()
     db.commit()
 
     steps = [
@@ -60,7 +60,7 @@ def test_complete_flow():
             print(f"\n{step_name}: '{message}'")
             print("-" * 80)
 
-            response = handle_inbound(db, wa_id, message, f"test_msg_{i}")
+            response = handle_inbound(db, telegram_user_id, message, f"test_msg_{i}")
 
             # Print bot response (truncated for readability)
             if response:
@@ -96,7 +96,7 @@ def test_complete_flow():
                     print("⚠️  Preview may not have displayed")
 
         # Check final job status
-        user = db.query(User).filter(User.wa_id == wa_id).first()
+        user = db.query(User).filter(User.telegram_user_id == telegram_user_id).first()
         if user:
             jobs = db.query(Job).filter(Job.user_id == user.id).all()
             print(f"\n\n📊 FINAL STATUS:")

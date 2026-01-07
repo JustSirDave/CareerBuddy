@@ -539,7 +539,7 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
             filename = f"{job.type}_{job.id[:8]}.docx"
             file_path = storage.save_file_locally(job.id, doc_bytes, filename)
 
-            # Store document temporarily for sending via WhatsApp
+            # Store document temporarily for sending via Telegram
             # We'll use draft_text to store the file path
             job.draft_text = file_path
             job.status = "preview_ready"
@@ -886,7 +886,7 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
 
         db.commit()
         db.refresh(user)
-        logger.info(f"[handle_inbound] Updated user wa_id={wa_id} to tier={user.tier}")
+        logger.info(f"[handle_inbound] Updated user telegram_user_id={telegram_user_id} to tier={user.tier}")
 
         # Log the tier confirmation message
         db.add(Message(user_id=user.id, direction="outbound", content=tier_msg))

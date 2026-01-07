@@ -111,16 +111,16 @@ async def create_payment_link(user: User, role: str, amount: int = PAID_GENERATI
         amount_kobo = amount * 100
 
         payload = {
-            "email": user.email or f"{user.wa_id}@careerbuddy.temp",
+            "email": user.email or f"user_{user.telegram_user_id}@careerbuddy.temp",
             "amount": amount_kobo,
             "metadata": {
                 "user_id": user.id,
-                "wa_id": user.wa_id,
+                "telegram_user_id": user.telegram_user_id,
                 "role": role,
                 "purpose": "document_generation"
             },
-            # route lives under /webhooks/whatsapp/paystack
-            "callback_url": f"{settings.public_url}/webhooks/whatsapp/paystack"
+            # route lives under /webhooks/paystack
+            "callback_url": f"{settings.public_url}/webhooks/paystack"
         }
 
         async with httpx.AsyncClient(timeout=30) as client:

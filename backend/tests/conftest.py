@@ -38,7 +38,8 @@ def db_session(db_engine):
 def test_user(db_session):
     """Create test user"""
     user = User(
-        wa_id="test_user_123",
+        telegram_user_id="123456789",
+        telegram_username="test_user",
         name="Test User",
         email="test@example.com",
         phone="+1234567890"

@@ -19,7 +19,7 @@ class Job(Base):
     draft_text = Column(String)  # Generated draft
     final_text = Column(String)  # Processed final version
 
-    last_msg_id = Column(String(255), index=True)  # WhatsApp message deduplication
+    last_msg_id = Column(String(255), index=True)  # Telegram message deduplication
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())
