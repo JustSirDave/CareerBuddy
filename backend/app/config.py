@@ -15,6 +15,7 @@ class Settings(BaseModel):
 
     # Telegram Bot
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    admin_telegram_ids: list[str] = os.getenv("ADMIN_TELEGRAM_IDS", "").split(",") if os.getenv("ADMIN_TELEGRAM_IDS") else []
 
     # Database
     database_url: str = os.getenv(

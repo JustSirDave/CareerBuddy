@@ -23,7 +23,14 @@ GREETINGS = {"hi", "hello", "hey", "start", "menu", "/start"}
 RESETS = {"reset", "/reset", "restart"}
 HELP_COMMANDS = {"/help", "help"}
 STATUS_COMMANDS = {"/status", "status"}
+ADMIN_COMMANDS = {"/admin", "/stats", "/broadcast"}
 FORCE_LOWER = lambda s: (s or "").strip().lower()
+
+
+def is_admin(telegram_user_id: str) -> bool:
+    """Check if user is an admin."""
+    from app.config import settings
+    return telegram_user_id in settings.admin_telegram_ids
 
 
 def _progress_bar(current_step: int, total_steps: int) -> str:
@@ -908,6 +915,87 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
     return "Something went wrong. Please type */reset* to start over."
 
 
+async def get_admin_stats(db: Session) -> str:
+    """Get bot statistics for admin."""
+    from sqlalchemy import func
+    from datetime import datetime, timedelta
+    import json
+    
+    # Total users
+    total_users = db.query(User).count()
+    
+    # New users (last 7 days)
+    seven_days_ago = datetime.now() - timedelta(days=7)
+    new_users = db.query(User).filter(User.created_at >= seven_days_ago).count()
+    
+    # Active jobs
+    active_jobs = db.query(Job).filter(Job.status.in_(["collecting", "preview_ready", "finalizing"])).count()
+    
+    # Completed jobs
+    completed_jobs = db.query(Job).filter(Job.status == "completed").count()
+    
+    # Total messages
+    total_messages = db.query(Message).count()
+    
+    # Documents by type
+    resume_count = db.query(Job).filter(Job.type == "resume").count()
+    cv_count = db.query(Job).filter(Job.type == "cv").count()
+    revamp_count = db.query(Job).filter(Job.type == "revamp").count()
+    
+    # User tier breakdown
+    free_users = db.query(User).filter(User.tier == "free").count()
+    pro_users = db.query(User).filter(User.tier == "pro").count()
+    
+    stats_msg = f"""📊 *Career Buddy - Admin Stats*
+
+*👥 Users*
+• Total: {total_users}
+• New (7 days): {new_users}
+• Free tier: {free_users}
+• Pro tier: {pro_users}
+
+*📄 Documents*
+• Active jobs: {active_jobs}
+• Completed: {completed_jobs}
+• Resumes: {resume_count}
+• CVs: {cv_count}
+• Revamps: {revamp_count}
+
+*💬 Activity*
+• Total messages: {total_messages}
+• Avg per user: {total_messages / total_users if total_users > 0 else 0:.1f}
+
+_Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC_"""
+    
+    return stats_msg
+
+
+async def broadcast_message(db: Session, message: str, sender_id: str) -> str:
+    """Broadcast a message to all users."""
+    from app.services import telegram
+    
+    all_users = db.query(User).all()
+    success_count = 0
+    fail_count = 0
+    
+    broadcast_text = f"""📢 *Announcement from Career Buddy*
+
+{message}"""
+    
+    for user in all_users:
+        try:
+            await telegram.reply_text(user.telegram_user_id, broadcast_text)
+            success_count += 1
+        except Exception as e:
+            logger.error(f"[broadcast] Failed to send to {user.telegram_user_id}: {e}")
+            fail_count += 1
+    
+    return (f"✅ *Broadcast Complete!*\n\n"
+           f"• Sent: {success_count}\n"
+           f"• Failed: {fail_count}\n"
+           f"• Total: {len(all_users)}")
+
+
 async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: str | None = None, telegram_username: str | None = None) -> str:
     # NOTE: Deduplication is handled in webhook.py before calling this function
 
@@ -931,11 +1019,25 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
     db.add(Message(user_id=user.id, direction="inbound", content=incoming))
     db.commit()
 
-    # 1.5) Help command
+    # 1.5) Admin commands (only for admins)
+    if t_lower in ADMIN_COMMANDS and is_admin(telegram_user_id):
+        if t_lower in {"/stats", "/admin"}:
+            return await get_admin_stats(db)
+        elif t_lower.startswith("/broadcast "):
+            # Extract message after "/broadcast "
+            broadcast_msg = incoming[len("/broadcast "):].strip()
+            if broadcast_msg:
+                return await broadcast_message(db, broadcast_msg, telegram_user_id)
+            else:
+                return ("📢 *Broadcast Command*\n\n"
+                       "*Usage:* /broadcast <message>\n\n"
+                       "*Example:* /broadcast Hello everyone! New features coming soon!")
+
+    # 1.6) Help command
     if t_lower in HELP_COMMANDS:
         return HELP_MESSAGE
 
-    # 1.6) Status command
+    # 1.7) Status command
     if t_lower in STATUS_COMMANDS:
         import json
         generation_counts = json.loads(user.generation_count) if user.generation_count else {}
