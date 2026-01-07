@@ -46,8 +46,8 @@ def upgrade() -> None:
     op.create_index('ix_users_telegram_user_id', 'users', ['telegram_user_id'], unique=False)
     op.create_unique_constraint('uq_users_telegram_user_id', 'users', ['telegram_user_id'])
     
-    # Drop old wa_id column
-    op.drop_index('ix_users_wa_id', table_name='users')
+    # Drop old wa_id constraint and column
+    op.drop_constraint('users_wa_id_key', 'users', type_='unique')
     op.drop_column('users', 'wa_id')
 
 
@@ -63,9 +63,8 @@ def downgrade() -> None:
     # Make wa_id non-nullable
     op.alter_column('users', 'wa_id', nullable=False)
     
-    # Recreate index and unique constraint for wa_id
-    op.create_index('ix_users_wa_id', 'users', ['wa_id'], unique=False)
-    op.create_unique_constraint('uq_users_wa_id', 'users', ['wa_id'])
+    # Recreate unique constraint for wa_id
+    op.create_unique_constraint('users_wa_id_key', 'users', ['wa_id'])
     
     # Drop Telegram columns
     op.drop_constraint('uq_users_telegram_user_id', 'users', type_='unique')

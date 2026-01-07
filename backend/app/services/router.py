@@ -9,9 +9,43 @@ from app.services.idempotency import seen_or_mark
 from app.services import orchestrator, renderer, storage, ai, payments
 
 WELCOME = "Hi! What would you like to create first?\nReply with *Resume*, *CV*, or *Cover Letter*."
-GREETINGS = {"hi", "hello", "hey", "start", "menu"}
+GREETINGS = {"hi", "hello", "hey", "start", "menu", "/start"}
 RESETS = {"reset", "/reset", "restart"}
+HELP_COMMANDS = {"/help", "help"}
+STATUS_COMMANDS = {"/status", "status"}
 FORCE_LOWER = lambda s: (s or "").strip().lower()
+
+# Help message
+HELP_MESSAGE = """🤖 *Career Buddy - Help Guide*
+
+I help you create professional resumes, CVs, and cover letters tailored to your dream role!
+
+*📝 Available Documents:*
+• *Resume* - 1-2 page professional resume
+• *CV* - Detailed curriculum vitae
+• *Revamp* - Improve your existing resume/CV
+• *Cover Letter* - Coming soon!
+
+*🎯 How It Works:*
+1. Choose your document type
+2. Answer my questions step by step
+3. I'll enhance your content with AI
+4. Receive your professional document!
+
+*💡 Commands:*
+/start - Start creating a document
+/status - Check your plan & remaining documents
+/reset - Cancel and start over
+/help - Show this help message
+
+*💳 Pricing:*
+• *Free Plan*: 2 free documents
+• *Pay-Per-Generation*: ₦7,500 per document
+
+*🆘 Need Support?*
+Contact: @your_support_username
+
+Ready to begin? Just type /start!"""
 
 
 def _advance(db: Session, job: Job, answers: dict, next_step: str):
@@ -861,6 +895,46 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
     # 1) Log inbound message
     db.add(Message(user_id=user.id, direction="inbound", content=incoming))
     db.commit()
+
+    # 1.5) Help command
+    if t_lower in HELP_COMMANDS:
+        return HELP_MESSAGE
+
+    # 1.6) Status command
+    if t_lower in STATUS_COMMANDS:
+        import json
+        generation_counts = json.loads(user.generation_count) if user.generation_count else {}
+        total_generated = sum(generation_counts.values())
+        
+        status_msg = f"""📊 *Your Account Status*
+
+👤 *User:* {user.name or user.telegram_username or 'User'}
+🎯 *Plan:* {'Free' if user.tier == 'free' else 'Premium'}
+📄 *Documents Created:* {total_generated}
+
+"""
+        if user.tier == "free":
+            remaining = max(0, 2 - total_generated)
+            status_msg += f"""*🆓 Free Plan:*
+✅ {remaining} free document{'s' if remaining != 1 else ''} remaining
+💡 After that: ₦7,500 per document
+
+"""
+        else:
+            status_msg += """*💎 Premium Plan:*
+✅ Enhanced AI features
+✅ Priority support
+💰 ₦7,500 per document
+
+"""
+        
+        if generation_counts:
+            status_msg += "*📈 Generation History:*\n"
+            for role, count in generation_counts.items():
+                status_msg += f"• {role}: {count} document{'s' if count != 1 else ''}\n"
+        
+        status_msg += "\nReady to create? Type /start!"
+        return status_msg
 
     # 2) Reset/menu
     if t_lower in RESETS:

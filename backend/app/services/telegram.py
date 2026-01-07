@@ -40,7 +40,7 @@ async def reply_text(chat_id: int | str, text: str, parse_mode: str = "Markdown"
 
 async def send_choice_menu(chat_id: int | str):
     """
-    Send initial welcome message and tier selection.
+    Send initial welcome message with inline keyboard for plan selection.
 
     Args:
         chat_id: Telegram chat ID
@@ -48,41 +48,61 @@ async def send_choice_menu(chat_id: int | str):
     Returns:
         Response JSON from Telegram API
     """
-    welcome_msg = """👋 Hi! I'm Career Buddy, your personal AI assistant for creating professional resumes, CVs, and cover letters tailored to your dream role.
+    welcome_msg = """👋 *Welcome to Career Buddy!*
 
-Need help? Contact support: @YourSupportHandle"""
+Your personal AI assistant for creating professional resumes, CVs, and cover letters tailored to your dream role.
 
-    await reply_text(chat_id, welcome_msg)
-
-    # Send tier selection as a second message
-    tier_msg = """Let's get started! Choose your plan:
+*🎯 What I offer:*
 
 *🆓 Free Plan*
 • 2 free documents (Resume or CV)
-• AI-powered generation with GPT-4o-mini
+• AI-powered generation
 • Professional summaries
 • Smart skill suggestions
-• Standard support
 
 *💳 Pay-Per-Generation*
 • ₦7,500 per document
-• Enhanced AI with business impact analysis
-• Senior-level professional summaries
-• Advanced skills extraction
-• Cover letter generation (coming soon)
+• Enhanced AI features
+• Business impact analysis
 • Priority support
-• Max 5 documents per role
 
-Ready to begin?
-• Type *Free* to start with 2 free documents
-• After free limit, pay ₦7,500 per document"""
+_Need help? Use /help command_"""
 
-    return await reply_text(chat_id, tier_msg)
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    
+    # Inline keyboard with buttons
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "🆓 Start with Free Plan", "callback_data": "plan_free"}
+            ],
+            [
+                {"text": "💡 Learn More", "callback_data": "learn_more"}
+            ]
+        ]
+    }
+    
+    payload = {
+        "chat_id": chat_id,
+        "text": welcome_msg,
+        "parse_mode": "Markdown",
+        "reply_markup": keyboard
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload)
+            if r.status_code >= 400:
+                logger.error(f"Telegram send menu failed: {r.status_code} {r.text}")
+            return r.json() if r.content else {}
+    except Exception as e:
+        logger.error(f"Telegram send menu exception: {e}")
+        return {"error": str(e)}
 
 
 async def send_document_type_menu(chat_id: int | str, user_tier: str = "free"):
     """
-    Send document type selection menu based on user tier.
+    Send document type selection menu with inline keyboard.
 
     Args:
         chat_id: Telegram chat ID
@@ -91,16 +111,47 @@ async def send_document_type_menu(chat_id: int | str, user_tier: str = "free"):
     Returns:
         Response JSON from Telegram API
     """
-    menu_text = """Perfect! What would you like to create today?
+    menu_text = """✨ *Let's Create Your Document!*
 
-Choose one:
-• *Resume*
-• *CV*
-• *Revamp* (improve existing resume/CV)
+Choose what you'd like to create:"""
 
-_💡 Cover Letter generation coming soon!_"""
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    
+    # Inline keyboard for document types
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "📄 Resume", "callback_data": "doc_resume"},
+                {"text": "📋 CV", "callback_data": "doc_cv"}
+            ],
+            [
+                {"text": "✨ Revamp Existing", "callback_data": "doc_revamp"}
+            ],
+            [
+                {"text": "📝 Cover Letter (Soon)", "callback_data": "doc_cover"}
+            ],
+            [
+                {"text": "❌ Cancel", "callback_data": "cancel"}
+            ]
+        ]
+    }
+    
+    payload = {
+        "chat_id": chat_id,
+        "text": menu_text,
+        "parse_mode": "Markdown",
+        "reply_markup": keyboard
+    }
 
-    return await reply_text(chat_id, menu_text)
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload)
+            if r.status_code >= 400:
+                logger.error(f"Telegram send doc menu failed: {r.status_code} {r.text}")
+            return r.json() if r.content else {}
+    except Exception as e:
+        logger.error(f"Telegram send doc menu exception: {e}")
+        return {"error": str(e)}
 
 
 async def send_document(chat_id: int | str, file_bytes: bytes, filename: str, caption: str = None) -> dict:

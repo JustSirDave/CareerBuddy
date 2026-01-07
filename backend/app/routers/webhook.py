@@ -25,6 +25,10 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
         logger.error(f"[telegram_webhook] Failed to parse JSON: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
+    # Handle callback queries (inline keyboard buttons)
+    if "callback_query" in payload:
+        return await handle_callback_query(payload["callback_query"], db)
+
     # Extract message from Telegram update
     chat_id, text, msg_id, username = extract_telegram_message(payload)
     if not chat_id:
@@ -117,6 +121,94 @@ Reply /reset to create another document."""
     except Exception as e:
         logger.error(f"[telegram_webhook] Error sending document: {e}")
         await reply_text(chat_id, "❌ Sorry, something went wrong. Please try again.")
+
+
+async def handle_callback_query(callback_query: dict, db):
+    """
+    Handle inline keyboard button clicks (callback queries).
+    
+    Args:
+        callback_query: Callback query data from Telegram
+        db: Database session
+    
+    Returns:
+        Response dict
+    """
+    try:
+        callback_id = callback_query.get("id")
+        data = callback_query.get("data")
+        message = callback_query.get("message", {})
+        chat_id = message.get("chat", {}).get("id")
+        from_user = callback_query.get("from", {})
+        username = from_user.get("username")
+        
+        logger.info(f"[callback_query] chat_id={chat_id}, data={data}")
+        
+        # Answer callback query to stop loading indicator
+        from app.services import telegram
+        answer_url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/answerCallbackQuery"
+        import httpx
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(answer_url, json={"callback_query_id": callback_id})
+        
+        # Handle different callback actions
+        if data == "plan_free":
+            # User clicked "Start with Free Plan"
+            reply = await handle_inbound(db, str(chat_id), "free", telegram_username=username)
+            if reply and reply.startswith("__SHOW_DOCUMENT_MENU__|"):
+                parts = reply.split("|")
+                if len(parts) >= 2:
+                    tier = parts[1]
+                    if len(parts) == 3:
+                        await reply_text(chat_id, parts[2])
+                    await send_document_type_menu(chat_id, tier)
+            elif reply:
+                await reply_text(chat_id, reply)
+        
+        elif data == "learn_more":
+            # Show more info about the service
+            info_msg = """📚 *About Career Buddy*
+
+I'm an AI-powered assistant that helps you create professional career documents that stand out!
+
+*🎯 What I create:*
+• Professional Resumes (1-2 pages)
+• Detailed CVs
+• Revamped/improved existing documents
+• Cover Letters (coming soon!)
+
+*✨ Features:*
+• AI-enhanced content
+• ATS-friendly formatting
+• Professional summaries
+• Smart skill suggestions
+• Instant delivery
+
+*💰 Pricing:*
+• Free: 2 documents
+• Paid: ₦7,500 per document
+
+Ready to create? Type /start!"""
+            await reply_text(chat_id, info_msg)
+        
+        elif data.startswith("doc_"):
+            # Document type selected
+            doc_type = data.replace("doc_", "")
+            if doc_type == "cover":
+                await reply_text(chat_id, "📝 *Cover Letter generation is coming soon!*\n\nFor now, try creating a Resume or CV. Type /start to begin!")
+            else:
+                reply = await handle_inbound(db, str(chat_id), doc_type, telegram_username=username)
+                if reply:
+                    await reply_text(chat_id, reply)
+        
+        elif data == "cancel":
+            await reply_text(chat_id, "❌ *Cancelled*\n\nNo problem! Type /start when you're ready to create a document.")
+        
+        return {"ok": True}
+        
+    except Exception as e:
+        logger.error(f"[callback_query] Error handling callback: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 def extract_telegram_message(payload: dict) -> tuple[int | None, str | None, int | None, str | None]:
