@@ -6,7 +6,7 @@ from loguru import logger
 from app.config import settings
 from app.services.idempotency import seen_or_mark
 from app.db import get_db
-from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu
+from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action
 from app.services.router import handle_inbound
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -39,6 +39,9 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
     if msg_id and seen_or_mark(str(msg_id)):
         logger.warning(f"[telegram_webhook] Duplicate msg_id={msg_id} from chat_id={chat_id}, skipping")
         return {"ok": True}
+
+    # Show typing indicator while processing
+    await send_typing_action(chat_id)
 
     # Process the message (using str(chat_id) as user identifier)
     reply = await handle_inbound(db, str(chat_id), text or "", msg_id=str(msg_id), telegram_username=username)
@@ -97,7 +100,21 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str):
 
         if send_resp and not send_resp.get("error"):
             logger.info(f"[telegram_webhook] Document sent to {chat_id}: {filename}")
-            await reply_text(chat_id, "✅ Delivered! Reply /reset to create another document.")
+            success_msg = """✅ *Document Delivered!*
+
+Your professional document is ready to use!
+
+*📋 What's Next?*
+• Review and customize it
+• Download and print  
+• Share with recruiters
+
+*🔄 Need Another Document?*
+Type /reset to create a new one
+Type /status to check your plan
+
+Good luck with your job search! 🚀"""
+            await reply_text(chat_id, success_msg)
             return
 
         # Fallback to download link

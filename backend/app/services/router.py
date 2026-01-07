@@ -8,12 +8,47 @@ from app.flows import resume as resume_flow
 from app.services.idempotency import seen_or_mark
 from app.services import orchestrator, renderer, storage, ai, payments
 
-WELCOME = "Hi! What would you like to create first?\nReply with *Resume*, *CV*, or *Cover Letter*."
+WELCOME = """👋 *Welcome to Career Buddy!*
+
+Your AI-powered career document assistant. I'll help you create professional resumes, CVs, and cover letters that get results!
+
+*🚀 Quick Start:*
+Just answer a few simple questions and I'll:
+• ✨ Enhance your content with AI
+• 📝 Format everything professionally  
+• 📄 Deliver your document instantly
+
+Ready to begin? Choose a document type below! 👇"""
 GREETINGS = {"hi", "hello", "hey", "start", "menu", "/start"}
 RESETS = {"reset", "/reset", "restart"}
 HELP_COMMANDS = {"/help", "help"}
 STATUS_COMMANDS = {"/status", "status"}
 FORCE_LOWER = lambda s: (s or "").strip().lower()
+
+
+def _progress_bar(current_step: int, total_steps: int) -> str:
+    """Generate a visual progress bar."""
+    filled = "●" * current_step
+    empty = "○" * (total_steps - current_step)
+    percentage = int((current_step / total_steps) * 100)
+    return f"{filled}{empty} {percentage}% ({current_step}/{total_steps})"
+
+
+def _add_progress(message: str, step: str) -> str:
+    """Add progress indicator to a message based on current step."""
+    # Define step order and total for resume/CV flow
+    steps_order = ["basics", "summary", "skills", "experiences", "experience_bullets", 
+                   "education", "projects", "target_role", "review"]
+    
+    if step not in steps_order:
+        return message
+    
+    current = steps_order.index(step) + 1
+    total = len(steps_order)
+    progress = _progress_bar(current, total)
+    
+    return f"📊 *Progress:* {progress}\n\n{message}"
+
 
 # Help message
 HELP_MESSAGE = """🤖 *Career Buddy - Help Guide*

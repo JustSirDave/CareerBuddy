@@ -5,34 +5,45 @@ from typing import Dict, List
 
 QUESTIONS = {
     "basics": (
-        "Great! Let's start with your details.\n"
-        "Please send in one line (comma-separated):\n"
-        "Full Name, Email, Phone, City Country\n\n"
-        "Example: John Doe, user@example.com, +234-xxx, Lagos Nigeria"
+        "📝 *Step 1: Basic Information*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Let's start with your details.\n"
+        "Send in one line (comma-separated):\n\n"
+        "*Format:* Full Name, Email, Phone, City Country\n\n"
+        "*Example:* John Doe, user@example.com, +234-xxx, Lagos Nigeria"
     ),
     "target_role": (
+        "🎯 *Step 2: Target Role*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
         "What role/position are you applying for?\n\n"
-        "Example: Data Analyst\n"
-        "Example: Backend Engineer\n"
-        "Example: Marketing Manager"
+        "*Examples:*\n"
+        "• Data Analyst\n"
+        "• Backend Engineer\n"
+        "• Marketing Manager"
     ),
     "experience": (
-        "Let's add a work experience.\n\n"
-        "Send: Role, Company, City, Start (MMM YYYY), End (MMM YYYY or Present)\n\n"
-        "Example: Backend Engineer, TechCorp, Lagos, Jan 2020, Present\n\n"
-        "Next, you'll send 2–4 bullet points describing your achievements.\n"
-        "Example bullet: Increased sales by 40% through strategic marketing campaigns"
+        "💼 *Step 3: Work Experience*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Let's add your work experience.\n\n"
+        "*Format:* Role, Company, City, Start (MMM YYYY), End (MMM YYYY or Present)\n\n"
+        "*Example:* Backend Engineer, TechCorp, Lagos, Jan 2020, Present\n\n"
+        "Next, you'll add 2–4 bullet points about your achievements."
     ),
     "education": (
-        "Education: Degree, School, Year\n\n"
-        "Example: B.Sc. Computer Science, University of Lagos, 2020\n\n"
-        "You can add multiple—send one per message, or type *skip*."
+        "🎓 *Step 4: Education*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "*Format:* Degree, School, Year\n\n"
+        "*Example:* B.Sc. Computer Science, University of Lagos, 2020\n\n"
+        "You can add multiple—send one per message, or type *done* when finished."
     ),
     "extras": (
-        "Almost done! Any projects, certifications, or volunteer work to add?\n\n"
-        "Example: Built an e-commerce platform using React and Node.js\n"
-        "Example: AWS Certified Solutions Architect\n"
-        "Example: Volunteer coding instructor at Code Club\n\n"
+        "⭐ *Step 5: Additional Info*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Almost done! Any projects, certifications, or volunteer work?\n\n"
+        "*Examples:*\n"
+        "• Built an e-commerce platform using React\n"
+        "• AWS Certified Solutions Architect\n"
+        "• Volunteer coding instructor\n\n"
         "Send one per message, or type *done* to finish."
     ),
 }
