@@ -1,6 +1,3 @@
-# ============================================================================
-# FILE: backend/app/models/file.py
-# ============================================================================
 from sqlalchemy import Column, String, DateTime, Integer, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func

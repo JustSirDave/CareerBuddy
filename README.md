@@ -4,11 +4,11 @@
 
 ## Overview
 
-CareerBuddy is an intelligent agent that helps users create ATS-compliant professional documents through a guided conversation. Currently supports **WhatsApp** as the primary interface, with plans to expand to web.
+CareerBuddy is an intelligent agent that helps users create ATS-compliant professional documents through a guided conversation. Currently supports **Telegram** as the primary interface, with plans to expand to web.
 
 ### Key Features
 
--  **Conversational Interface** - Natural conversation flow via WhatsApp
+-  **Conversational Interface** - Natural conversation flow via Telegram
 -  **AI-Enhanced Content** - Claude AI improves summaries and bullet points
 -  **ATS-Compliant** - Documents follow applicant tracking system best practices
 -  **Multi-Document Support** - Resume, CV, and cover letter generation
@@ -38,7 +38,7 @@ CareerBuddy is an intelligent agent that helps users create ATS-compliant profes
 - **boto3** - S3/Cloudflare R2 integration
 
 ### External APIs
-- **WAHA (WhatsApp HTTP API)** - Self-hosted WhatsApp interface
+- **Telegram Bot API** - Official Telegram bot interface
 
 ### Infrastructure
 - **Docker & Docker Compose** - Containerization
@@ -48,7 +48,7 @@ CareerBuddy is an intelligent agent that helps users create ATS-compliant profes
 ### Prerequisites
 
 - Docker & Docker Compose
-- WhatsApp number for WAHA (can use personal WhatsApp)
+- Telegram Bot Token (get from @BotFather on Telegram)
 - Anthropic API key (optional, for AI features)
 
 ### 1. Environment Setup
@@ -60,14 +60,13 @@ Create `.env` file in project root:
 APP_ENV=local
 APP_PORT=8000
 LOG_LEVEL=info
+PUBLIC_URL=http://localhost:8000
 
-# WAHA (WhatsApp HTTP API)
-WAHA_URL=http://waha:3000
-WAHA_SESSION=default
-WAHA_API_KEY=  # Optional, leave empty for development
+# Telegram Bot
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 
 # Database
-DATABASE_URL=postgresql+psycopg://postgres:postgres@postgres:5432/buddy
+DATABASE_URL=postgresql://postgres:postgres@postgres:5432/buddy
 
 # Redis
 REDIS_URL=redis://redis:6379/0
@@ -76,11 +75,15 @@ REDIS_URL=redis://redis:6379/0
 ANTHROPIC_API_KEY=your_anthropic_key_here
 OPENAI_API_KEY=your_openai_key_here
 
-# Storage (Optional - files saved locally by default)
-S3_ENDPOINT=https://your-endpoint.com
-S3_BUCKET=your-bucket
-S3_ACCESS_KEY_ID=your_key
-S3_SECRET_ACCESS_KEY=your_secret
+# Payments (Paystack - Optional)
+PAYSTACK_SECRET=your_paystack_secret_here
+
+# Storage (S3 - Optional, files saved locally by default)
+S3_ENDPOINT=
+S3_REGION=
+S3_BUCKET=
+S3_ACCESS_KEY_ID=
+S3_SECRET_ACCESS_KEY=
 ```
 
 ### 2. Start Services
@@ -102,41 +105,49 @@ curl http://localhost:8000/health
 # Response: {"status": "ok", "env": "local"}
 ```
 
-### 5. Connect WhatsApp to WAHA
+### 5. Create Telegram Bot
 
-1. **Get QR Code:**
+1. **Get Bot Token from @BotFather:**
+   - Open Telegram and search for `@BotFather`
+   - Send `/newbot` command
+   - Follow the prompts to name your bot
+   - Copy the bot token provided
+
+2. **Add Token to .env:**
    ```bash
-   # Start a new WhatsApp session
-   curl -X POST http://localhost:3000/api/sessions/start \
+   TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
+   ```
+
+3. **Set Webhook:**
+   ```bash
+   curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
      -H "Content-Type: application/json" \
-     -d '{"name": "default"}'
-
-   # Get the QR code
-   curl http://localhost:3000/api/sessions/default/qr
+     -d '{"url": "https://your-public-domain.com/webhooks/telegram"}'
    ```
-
-2. **Scan QR Code:**
-   - Open WhatsApp on your phone
-   - Go to Settings > Linked Devices
-   - Tap "Link a Device"
-   - Scan the QR code from the API response
-
-3. **Verify Connection:**
+   
+   For local development with ngrok:
    ```bash
-   curl http://localhost:3000/api/sessions/default
-   # Should show status: "WORKING"
+   # Install ngrok and run
+   ngrok http 8000
+   
+   # Use the ngrok URL for webhook
+   curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://your-ngrok-url.ngrok.io/webhooks/telegram"}'
    ```
 
-4. **Configure Webhook (already set in docker-compose):**
-   The webhook is automatically configured to forward messages to your FastAPI backend at `http://api:8000/webhooks/whatsapp`
+4. **Verify Webhook:**
+   ```bash
+   curl "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getWebhookInfo"
+   ```
 
 ## Usage
 
-### WhatsApp Conversation Example
+### Telegram Conversation Example
 
 ```
-User: Hi
-Bot: What would you like to create? [Resume] [CV] [Cover Letter]
+User: /start
+Bot: 👋 Hi! Choose your plan: Free or Pay-Per-Generation
 
 User: Resume
 Bot: Send your details (comma-separated):
@@ -157,24 +168,24 @@ Bot: Send 2-4 bullets. Type 'done' when finished.
 User: Built API serving 1M+ requests/day
 User: Reduced query time by 60%
 User: done
-Bot:  Your resume is ready!
+Bot:  Your resume is ready! [Document sent]
 ```
 
 ## Architecture
 
 ```
-WhatsApp ↔ WAHA ↔ FastAPI → AI Enhancement → Document Renderer → Storage
-                      ↓
-                PostgreSQL + Redis
+Telegram ↔ FastAPI → AI Enhancement → Document Renderer → Storage
+             ↓
+       PostgreSQL + Redis
 ```
 
 ## Database Schema
 
-- **Users** - WhatsApp user data
+- **Users** - Telegram user data (telegram_user_id, username, tier)
 - **Jobs** - Document creation sessions
 - **Messages** - Conversation history
 - **Files** - Generated document metadata
-- **Payments** - Transaction records (future)
+- **Payments** - Transaction records (Paystack integration)
 
 ## Development
 
@@ -188,10 +199,10 @@ uvicorn app.main:app --reload
 
 ## Project Status
 
-**Phase 2-3: Core Features Complete (60%)**
+**Phase 2-3: Core Features Complete (70%)**
 
 -  Infrastructure & Database
--  WhatsApp Integration
+-  Telegram Integration
 -  Resume/CV Flow
 -  Document Rendering
 -  AI Enhancement

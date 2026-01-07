@@ -13,7 +13,8 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    wa_id = Column(String(50), unique=True, nullable=False, index=True)
+    telegram_user_id = Column(String(50), unique=True, nullable=False, index=True)  # Telegram chat ID
+    telegram_username = Column(String(100))  # Optional Telegram username
     name = Column(String(200))
     email = Column(String(200))
     phone = Column(String(50))
@@ -29,4 +30,4 @@ class User(Base):
     payments = relationship("Payment", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<User(id={self.id}, wa_id={self.wa_id}, name={self.name})>"
+        return f"<User(id={self.id}, telegram_user_id={self.telegram_user_id}, name={self.name})>"

@@ -13,10 +13,8 @@ class Settings(BaseModel):
     log_level: str = os.getenv("LOG_LEVEL", "info")
     public_url: str = os.getenv("PUBLIC_URL", "http://localhost:8000")
 
-    # WAHA (WhatsApp HTTP API)
-    waha_url: str = os.getenv("WAHA_URL", "http://waha:3000")
-    waha_session: str = os.getenv("WAHA_SESSION", "default")
-    waha_api_key: str = os.getenv("WAHA_API_KEY", "")
+    # Telegram Bot
+    telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
     # Database
     database_url: str = os.getenv(

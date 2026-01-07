@@ -839,17 +839,21 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
     return "Something went wrong. Please type */reset* to start over."
 
 
-async def handle_inbound(db: Session, wa_id: str, text: str, msg_id: str | None = None) -> str:
+async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: str | None = None, telegram_username: str | None = None) -> str:
     # NOTE: Deduplication is handled in webhook.py before calling this function
 
     # 0) Ensure user
-    user = db.query(User).filter(User.wa_id == wa_id).first()
+    user = db.query(User).filter(User.telegram_user_id == telegram_user_id).first()
     if not user:
-        user = User(wa_id=wa_id, tier="free")  # Default to free tier
+        user = User(
+            telegram_user_id=telegram_user_id,
+            telegram_username=telegram_username,
+            tier="free"  # Default to free tier
+        )
         db.add(user)
         db.commit()
         db.refresh(user)
-        logger.info(f"[handle_inbound] Created new user wa_id={wa_id} tier=free")
+        logger.info(f"[handle_inbound] Created new user telegram_user_id={telegram_user_id} tier=free")
 
     incoming = (text or "").strip()
     t_lower = incoming.lower()
