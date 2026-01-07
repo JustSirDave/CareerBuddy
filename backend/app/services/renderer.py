@@ -119,22 +119,22 @@ def _render_template_1(answers: dict) -> bytes:
     name = basics.get('name', 'Your Name')
     title = basics.get('title', 'Professional Title')
 
-    # Name (Large, Bold, Centered) - Calibri 20pt
+    # Name (Large, Bold, Centered) - Increased font size
     name_para = doc.add_paragraph()
     name_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     name_run = name_para.add_run(name)
-    name_run.font.size = Pt(20)
+    name_run.font.size = Pt(24)  # Increased from 20pt
     name_run.font.bold = True
     name_run.font.name = 'Calibri'
-    name_para.space_after = Pt(2)
+    name_para.space_after = Pt(1)  # Consistent 1pt spacing
 
-    # Title (Centered) - Calibri 12pt
+    # Title (Centered, ALL CAPS) - Increased font size
     title_para = doc.add_paragraph()
     title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_run = title_para.add_run(title)
-    title_run.font.size = Pt(12)
+    title_run = title_para.add_run(title.upper())  # ALL CAPS
+    title_run.font.size = Pt(14)  # Increased from 12pt
     title_run.font.name = 'Calibri'
-    title_para.space_after = Pt(6)
+    title_para.space_after = Pt(1)  # Consistent 1pt spacing
 
     # Contact Info - NO ICONS, pipe separators - Calibri 12pt
     contact_parts = []
@@ -149,13 +149,13 @@ def _render_template_1(answers: dict) -> bytes:
         contact_para = doc.add_paragraph()
         contact_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
         contact_run = contact_para.add_run(' | '.join(contact_parts))
-        contact_run.font.size = Pt(12)
+        contact_run.font.size = Pt(13)  # Increased from 12pt
         contact_run.font.name = 'Calibri'
-        contact_para.space_after = Pt(8)
+        contact_para.space_after = Pt(1)  # Consistent 1pt spacing
 
     # Add horizontal line after header
     _add_horizontal_line(doc)
-    doc.add_paragraph().space_after = Pt(12)  # Medium spacing
+    doc.add_paragraph().space_after = Pt(16)  # Increased spacing before first section
 
     # ==================== MAIN CONTENT TABLE ====================
     from docx.oxml.shared import OxmlElement
@@ -220,7 +220,7 @@ def _render_template_1(answers: dict) -> bytes:
         label_run.font.name = 'Calibri'
         
         content_para = content_cell.paragraphs[0]
-        content_para.paragraph_format.space_after = Pt(4)  # Less spacing
+        content_para.paragraph_format.space_after = Pt(16)  # Uniform spacing
         
         # Add clickable hyperlinks for profiles (NO icons)
         for idx, profile in enumerate(profiles):
@@ -252,7 +252,7 @@ def _render_template_1(answers: dict) -> bytes:
         
         content_para = content_cell.paragraphs[0]
         content_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        content_para.paragraph_format.space_after = Pt(12)  # Medium spacing
+        content_para.paragraph_format.space_after = Pt(16)  # Uniform spacing
         content_run = content_para.add_run(summary)
         content_run.font.size = Pt(12)  # Body size
         content_run.font.name = 'Calibri'
@@ -337,7 +337,7 @@ def _render_template_1(answers: dict) -> bytes:
             if idx < len(experiences) - 1:
                 content_cell.add_paragraph().space_after = Pt(4)
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(6)  # Reduced spacing after section
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Uniform spacing after section
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -396,7 +396,7 @@ def _render_template_1(answers: dict) -> bytes:
                 type_run.font.size = Pt(12)
                 type_run.font.name = 'Calibri'
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(6)  # Reduced spacing after section
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Uniform spacing after section
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -425,7 +425,7 @@ def _render_template_1(answers: dict) -> bytes:
                 proj_run.font.size = Pt(12)
                 proj_run.font.name = 'Calibri'
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(6)  # Reduced spacing after section
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Uniform spacing after section
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -467,7 +467,7 @@ def _render_template_1(answers: dict) -> bytes:
                     run.font.size = Pt(12)
                     run.font.name = 'Calibri'
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(6)  # Reduced spacing after section
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Uniform spacing after section
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
