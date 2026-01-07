@@ -1,0 +1,107 @@
+{
+  "basics": {
+    "name": "Sarah Johnson",
+    "title": "Senior Data Analyst",
+    "email": "sarah.johnson@email.com",
+    "phone": "+234-801-234-5678",
+    "location": "Lagos, Nigeria"
+  },
+  "target_role": "Senior Data Analyst",
+  "personal_traits": "I'm a detail-oriented professional who thrives on turning complex data into actionable insights. I enjoy collaborating with cross-functional teams and have a passion for continuous learning in the data science space.",
+  "summary": "Results-driven Data Analyst with 6+ years of experience transforming raw data into strategic business insights. Proven track record of developing data-driven solutions that increased revenue by 40% and reduced operational costs by 25%. Expert in Python, SQL, and cloud-based analytics platforms.",
+  "skills": [
+    "Python (Pandas, NumPy, Scikit-learn)",
+    "SQL & Database Management",
+    "Data Visualization (Tableau, Power BI)",
+    "Statistical Analysis & Modeling"
+  ],
+  "experiences": [
+    {
+      "company": "TechCorp Solutions",
+      "title": "Senior Data Analyst",
+      "role": "Senior Data Analyst",
+      "location": "Lagos",
+      "city": "Lagos",
+      "start": "Jan 2021",
+      "end": "Present",
+      "bullets": [
+        "Led data analytics team of 5 analysts, implementing automated reporting systems that reduced manual reporting time by 60%",
+        "Developed predictive models that increased customer retention by 35% and generated ₦50M in additional revenue",
+        "Built interactive dashboards using Tableau and Power BI, providing real-time insights to C-suite executives",
+        "Collaborated with product team to analyze user behavior data, leading to 3 major product improvements"
+      ]
+    },
+    {
+      "company": "DataInsights Nigeria",
+      "title": "Data Analyst",
+      "role": "Data Analyst",
+      "location": "Lagos",
+      "city": "Lagos",
+      "start": "Jun 2018",
+      "end": "Dec 2020",
+      "bullets": [
+        "Analyzed customer transaction data for Nigeria's top e-commerce platform, identifying ₦30M in revenue opportunities",
+        "Created automated ETL pipelines using Python, reducing data processing time from 8 hours to 45 minutes",
+        "Presented monthly insights to stakeholders, influencing strategic decisions across marketing and operations",
+        "Trained 15+ team members on SQL and data visualization best practices"
+      ]
+    },
+    {
+      "company": "StartupHub Africa",
+      "title": "Junior Data Analyst",
+      "role": "Junior Data Analyst",
+      "location": "Lagos",
+      "city": "Lagos",
+      "start": "Jan 2017",
+      "end": "May 2018",
+      "bullets": [
+        "Performed ad-hoc analysis on customer demographics and behavior patterns for 20+ startup clients",
+        "Built Excel-based financial models that helped 5 startups secure Series A funding",
+        "Collaborated with marketing teams to optimize campaign performance, improving ROI by 45%"
+      ]
+    }
+  ],
+  "education": [
+    {
+      "institution": "University of Lagos",
+      "degree": "Statistics",
+      "degree_type": "B.Sc., First Class Honors",
+      "years": "2012 - 2016"
+    },
+    {
+      "institution": "Coursera",
+      "degree": "Google Data Analytics Professional Certificate",
+      "degree_type": "Certificate of Completion",
+      "years": "2020"
+    }
+  ],
+  "projects": [
+    {
+      "name": "Customer Churn Prediction System",
+      "details": "Built ML model using Python and scikit-learn to predict customer churn with 87% accuracy, deployed on AWS"
+    },
+    {
+      "name": "Sales Forecasting Dashboard",
+      "details": "Developed real-time sales forecasting tool using Tableau and Python, adopted by 200+ sales representatives"
+    },
+    {
+      "name": "Open Source Contributor",
+      "details": "Active contributor to pandas and data visualization libraries on GitHub"
+    }
+  ],
+  "certifications": [
+    "AWS Certified Data Analytics - Specialty (2022)",
+    "Microsoft Certified: Azure Data Scientist Associate (2021)",
+    "Tableau Desktop Specialist (2020)"
+  ],
+  "profiles": [
+    {
+      "platform": "LinkedIn",
+      "url": "https://linkedin.com/in/sarahjohnson"
+    },
+    {
+      "platform": "GitHub",
+      "url": "https://github.com/sarahjohnson"
+    }
+  ]
+}

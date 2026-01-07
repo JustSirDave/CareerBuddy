@@ -23,7 +23,7 @@ GREETINGS = {"hi", "hello", "hey", "start", "menu", "/start"}
 RESETS = {"reset", "/reset", "restart"}
 HELP_COMMANDS = {"/help", "help"}
 STATUS_COMMANDS = {"/status", "status"}
-ADMIN_COMMANDS = {"/admin", "/stats", "/broadcast"}
+ADMIN_COMMANDS = {"/admin", "/stats", "/broadcast", "/sample"}
 FORCE_LOWER = lambda s: (s or "").strip().lower()
 
 
@@ -397,77 +397,63 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
             db.commit()
             return "Got it. Add more or type *done*."
 
-    # ---- SKILLS (AI-GENERATED) ----
+    # ---- SKILLS (SIMPLIFIED - NO AI DELAY) ----
     if step == "skills":
-        # Generate AI skill suggestions on first arrival
-        if not answers.get("ai_suggested_skills"):
-            logger.info("[handle_resume] Generating AI skill suggestions")
-            try:
-                target_role = answers.get("target_role", "")
-                basics = answers.get("basics", {})
-                experiences = answers.get("experiences", [])
+        if not t:
+            return ("💡 *List your top 5-8 skills* (comma-separated)\n\n"
+                    "*Example:* Python, Data Analysis, SQL, Communication, Project Management\n\n"
+                    "_AI will enhance these when generating your document!_")
+        
+        # Parse skills from user input
+        skills = [s.strip() for s in t.split(',') if s.strip()]
+        
+        if not skills or len(skills) < 3:
+            return ("Please list at least 3 skills, comma-separated.\n\n"
+                    "*Example:* Python, Data Analysis, SQL")
+        
+        answers["skills"] = skills[:8]  # Take max 8
+        _advance(db, job, answers, "summary")
+        
+        # Ask for summary (AI will enhance during generation)
+        return ("✨ *Professional Summary*\n\n"
+                "Write 2-3 sentences about yourself, or type *skip* for AI to generate one.\n\n"
+                "*Example:* Data Analyst with 5+ years building dashboards and insights. Skilled in Python and SQL.")
 
-                suggested_skills = ai.generate_skills(target_role, basics, experiences, tier=user_tier)
-                answers["ai_suggested_skills"] = suggested_skills
-
-                job.answers = answers
-                flag_modified(job, "answers")
-                db.commit()
-
-                # Show skill options
-                return resume_flow.format_skills_selection(suggested_skills)
-            except Exception as e:
-                logger.error(f"[handle_resume] AI skill generation failed: {e}")
-                # Fallback to manual entry
-                return ("Please list your skills (comma-separated).\n"
-                        "Example: Python, Data Analysis, SQL, Communication")
-        else:
-            # User is selecting skills
-            suggested = answers.get("ai_suggested_skills", [])
-            selected_skills = resume_flow.parse_skill_selection(t, suggested)
-
-            if not selected_skills:
-                return ("Please select skills by number (e.g., 1,3,5) or enter your own skills.\n"
-                        "Max 5 skills.")
-
-            answers["skills"] = selected_skills[:5]  # Enforce max 5
-            _advance(db, job, answers, "summary")
-
-            # Generate AI summary immediately
-            logger.info("[handle_resume] Generating AI summary after skill selection")
-            try:
-                ai_summary = ai.generate_summary(answers, tier=user_tier)
-                answers["summary"] = ai_summary
-
-                job.answers = answers
-                flag_modified(job, "answers")
-                db.commit()
-
-                # Show generated summary for approval
-                return (f"🤖 *Generated Summary:*\n\n{ai_summary}\n\n"
-                        "Reply *yes* to use this, or paste your own summary to replace it.")
-            except Exception as e:
-                logger.error(f"[handle_resume] AI summary generation failed: {e}")
-                return ("Please share a short professional summary (2-3 sentences), or type *skip*.")
-
-    # ---- SUMMARY (AI-GENERATED) ----
+    # ---- SUMMARY (SIMPLIFIED) ----
     if step == "summary":
-        # User is responding to the generated summary
-        if t.lower() in {"yes", "y", "ok", "looks good", "good"}:
-            # User approved the AI summary, move to preview
-            _advance(db, job, answers, "preview")
-            preview_text = _format_preview(answers)
-            return f"{preview_text}\n\nLooks good? Reply *yes* to generate your document, or */reset* to start over."
+        if not t:
+            return ("Please provide a 2-3 sentence professional summary, or type *skip*.\n\n"
+                    "*Example:* Data Analyst with 5+ years building dashboards.")
+        
+        if t.lower() in {"skip", "no", "generate"}:
+            answers["summary"] = ""  # AI will generate during rendering
         else:
-            # User provided custom summary
             answers["summary"] = t
+        
+        # Move to personal info collection before preview
+        _advance(db, job, answers, "personal_info")
+        return ("📝 *Tell me about yourself!*\n\n"
+                "Share a bit about your personality, work style, or what makes you unique.\n"
+                "This helps me write a better professional summary.\n\n"
+                "*Example:* I'm detail-oriented, love solving complex problems, and work well in teams.\n\n"
+                "Or type *skip* to use what you've provided.")
+
+    # ---- PERSONAL INFO (for better summary generation) ----
+    if step == "personal_info":
+        if not t:
+            return ("Please share something about yourself, or type *skip*.\n\n"
+                    "*Example:* I'm detail-oriented and love problem-solving.")
+        
+        if t.lower() not in {"skip", "no"}:
+            answers["personal_traits"] = t
             job.answers = answers
             flag_modified(job, "answers")
             db.commit()
-
-            _advance(db, job, answers, "preview")
-            preview_text = _format_preview(answers)
-            return f"{preview_text}\n\nLooks good? Reply *yes* to generate your document, or */reset* to start over."
+        
+        # Move to preview
+        _advance(db, job, answers, "preview")
+        preview_text = _format_preview(answers)
+        return f"{preview_text}\n\n✅ Reply *yes* to generate your document!"
 
     # ---- PREVIEW ----
     if step == "preview":
@@ -478,13 +464,29 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
 
         # User confirmed
         if t.lower() in {"yes", "y", "confirm", "ok", "okay"}:
-            _advance(db, job, answers, "finalize")
-            step = "finalize"
-            # Fall through to finalization
+            # Check if premium user - offer template selection
+            user = db.query(User).filter(User.id == job.user_id).first()
+            if user and user.tier != "free":
+                # Premium users get to choose template
+                _advance(db, job, answers, "template_selection")
+                return "__SHOW_TEMPLATE_MENU__"
+            else:
+                # Free users get default template 1
+                answers["template"] = "template_1"
+                _advance(db, job, answers, "finalize")
+                step = "finalize"
+                # Fall through to finalization
         else:
             # User wants to make changes
             return ("To make changes, please type */reset* to start over.\n\n"
                     "Or reply *yes* to proceed with generating your document.")
+
+    # ---- TEMPLATE SELECTION (handled via callback, but add safety) ----
+    if step == "template_selection":
+        # This step is handled via inline keyboard callback
+        # If user somehow sends a text message, guide them
+        return ("Please click one of the template buttons above to continue.\n\n"
+                "Or type */reset* to start over.")
 
     # ---- PAYMENT REQUIRED ----
     if step == "payment_required":
@@ -994,6 +996,85 @@ async def broadcast_message(db: Session, message: str, sender_id: str) -> str:
            f"• Total: {len(all_users)}")
 
 
+async def generate_sample_document(db: Session, user_id: int, template_choice: str = "template_1", doc_type: str = "resume") -> tuple[str, str]:
+    """
+    Generate a sample document with pre-filled data for admin testing.
+    
+    Args:
+        db: Database session
+        user_id: User ID
+        template_choice: Template to use (template_1, template_2, or template_3)
+        doc_type: Document type (resume, cv, or cover)
+    
+    Returns:
+        Tuple of (job_id, filename)
+    """
+    import json
+    import os
+    from pathlib import Path
+    
+    # Load sample data
+    # __file__ is /app/app/services/router.py, so go up 3 levels to /app/
+    sample_file = Path(__file__).parent.parent.parent / "sample_resume_data.json"
+    
+    try:
+        with open(sample_file, 'r', encoding='utf-8') as f:
+            sample_data = json.load(f)
+    except Exception as e:
+        logger.error(f"[generate_sample] Failed to load sample data: {e}")
+        raise Exception("Failed to load sample data file")
+    
+    # Add template choice
+    sample_data["template"] = template_choice
+    sample_data["_step"] = "done"
+    
+    # Create a job with sample data
+    job = Job(
+        user_id=user_id,
+        type=doc_type,  # Use the specified doc type
+        status="preview_ready",
+        answers=sample_data
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    
+    logger.info(f"[generate_sample] Created sample job.id={job.id} with template={template_choice}")
+    
+    # Generate the document
+    try:
+        # Call appropriate renderer based on doc type
+        if doc_type == "cv":
+            doc_bytes = renderer.render_cv(job)
+        elif doc_type == "cover":
+            doc_bytes = renderer.render_cover_letter(job)
+        else:  # resume
+            doc_bytes = renderer.render_resume(job)
+        
+        # Generate filename
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"sample_{doc_type}_{template_choice}_{timestamp}.docx"
+        
+        # Save to storage
+        file_path = storage.save_file_locally(job.id, doc_bytes, filename)
+        
+        # Update job status
+        job.status = "completed"
+        job.file_path = file_path
+        db.commit()
+        
+        logger.info(f"[generate_sample] Generated sample document: {filename}")
+        
+        return (job.id, filename)
+    
+    except Exception as e:
+        logger.error(f"[generate_sample] Document generation failed: {e}")
+        job.status = "failed"
+        db.commit()
+        raise Exception(f"Document generation failed: {str(e)}")
+
+
 async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: str | None = None, telegram_username: str | None = None) -> str:
     # NOTE: Deduplication is handled in webhook.py before calling this function
 
@@ -1018,7 +1099,15 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
     db.commit()
 
     # 1.5) Admin commands (only for admins)
-    if t_lower in ADMIN_COMMANDS and is_admin(telegram_user_id):
+    # Check if message starts with any admin command
+    is_admin_command = any(t_lower.startswith(cmd) for cmd in ADMIN_COMMANDS)
+    
+    if is_admin_command:
+        if not is_admin(telegram_user_id):
+            logger.warning(f"[handle_inbound] Non-admin {telegram_user_id} tried to use admin command: {t_lower}")
+            return "⚠️ This command is only available to administrators."
+        
+        logger.info(f"[handle_inbound] Admin {telegram_user_id} using command: {t_lower}")
         if t_lower in {"/stats", "/admin"}:
             return await get_admin_stats(db)
         elif t_lower.startswith("/broadcast "):
@@ -1030,6 +1119,48 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
                 return ("📢 *Broadcast Command*\n\n"
                        "*Usage:* /broadcast <message>\n\n"
                        "*Example:* /broadcast Hello everyone! New features coming soon!")
+        elif t_lower.startswith("/sample"):
+            # Generate sample document for testing
+            # Usage: /sample <type> [template]
+            # Example: /sample resume 1, /sample cv 2, /sample cover 3
+            parts = incoming.split()
+            
+            # Check if doc type is provided
+            if len(parts) < 2:
+                return ("📄 *Generate Sample Document*\n\n"
+                       "Type the complete command in ONE message:\n\n"
+                       "✅ `/sample resume` - Generate sample resume\n"
+                       "✅ `/sample cv` - Generate sample CV\n"
+                       "✅ `/sample cover` - Generate sample cover letter\n\n"
+                       "Optional: Add template number (1-3):\n"
+                       "✅ `/sample resume 2` - Resume with template 2\n\n"
+                       "_Note: Type the full command at once, not separately!_")
+            
+            doc_type = parts[1].lower()
+            if doc_type not in {"resume", "cv", "cover"}:
+                return ("❌ Invalid document type!\n\n"
+                       "Use: `/sample resume`, `/sample cv`, or `/sample cover`")
+            
+            template_num = "1"  # Default to template 1
+            if len(parts) > 2 and parts[2] in {"1", "2", "3"}:
+                template_num = parts[2]
+            
+            template_choice = f"template_{template_num}"
+            
+            try:
+                logger.info(f"[handle_inbound] Admin generating sample {doc_type} with {template_choice}")
+                
+                job_id, filename = await generate_sample_document(db, user.id, template_choice, doc_type)
+                
+                # Return marker to send document
+                return f"__SEND_DOCUMENT__|{job_id}|{filename}"
+            
+            except Exception as e:
+                logger.error(f"[handle_inbound] Sample generation failed: {e}")
+                error_msg = str(e).replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+                return (f"❌ *Sample Generation Failed*\n\n"
+                       f"Error: `{error_msg}`\n\n"
+                       f"Please check the logs for details.")
 
     # 1.6) Help command
     if t_lower in HELP_COMMANDS:
@@ -1037,26 +1168,34 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
 
     # 1.7) Status command
     if t_lower in STATUS_COMMANDS:
+        logger.info(f"[handle_inbound] Processing /status command for user {telegram_user_id}")
         import json
-        generation_counts = json.loads(user.generation_count) if user.generation_count else {}
+        try:
+            if user.generation_count:
+                generation_counts = json.loads(user.generation_count) if isinstance(user.generation_count, str) else user.generation_count
+            else:
+                generation_counts = {}
+        except Exception as e:
+            logger.error(f"[handle_inbound] Error parsing generation_count: {e}")
+            generation_counts = {}
         total_generated = sum(generation_counts.values())
         
         status_msg = f"""📊 *Your Account Status*
 
-👤 *User:* {user.name or user.telegram_username or 'User'}
-🎯 *Plan:* {'Free' if user.tier == 'free' else 'Premium'}
-📄 *Documents Created:* {total_generated}
+👤 User: {user.name or user.telegram_username or 'User'}
+🎯 Plan: {'Free' if user.tier == 'free' else 'Premium'}
+📄 Documents Created: {total_generated}
 
 """
         if user.tier == "free":
             remaining = max(0, 2 - total_generated)
-            status_msg += f"""*🆓 Free Plan:*
+            status_msg += f"""*Free Plan:*
 ✅ {remaining} free document{'s' if remaining != 1 else ''} remaining
 💡 After that: ₦7,500 per document
 
 """
         else:
-            status_msg += """*💎 Premium Plan:*
+            status_msg += """*Premium Plan:*
 ✅ Enhanced AI features
 ✅ Priority support
 💰 ₦7,500 per document
@@ -1064,7 +1203,7 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
 """
         
         if generation_counts:
-            status_msg += "*📈 Generation History:*\n"
+            status_msg += "*Generation History:*\n"
             for role, count in generation_counts.items():
                 status_msg += f"• {role}: {count} document{'s' if count != 1 else ''}\n"
         

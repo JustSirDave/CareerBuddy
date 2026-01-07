@@ -6,7 +6,7 @@ from loguru import logger
 from app.config import settings
 from app.services.idempotency import seen_or_mark
 from app.db import get_db
-from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request
+from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request, send_template_selection
 from app.services.router import handle_inbound
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -69,6 +69,14 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
         if len(parts) == 3:
             _, job_id, filename = parts
             await send_document_to_user(chat_id, job_id, filename)
+        return {"ok": True}
+
+    # Check if template selection menu should be shown
+    if reply == "__SHOW_TEMPLATE_MENU__":
+        from app.models import User
+        user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
+        if user:
+            await send_template_selection(chat_id, user.tier)
         return {"ok": True}
 
     # Check if payment is required
@@ -237,6 +245,39 @@ Ready to create? Type /start!"""
                 reply = await handle_inbound(db, str(chat_id), doc_type, telegram_username=username)
                 if reply:
                     await reply_text(chat_id, reply)
+        
+        elif data.startswith("template_"):
+            # Template selected
+            template_num = data.replace("template_", "")
+            logger.info(f"[callback_query] User {chat_id} selected {data}")
+            
+            # Update job with template choice
+            from app.models import Job
+            job = db.query(Job).filter(
+                Job.user_id.in_(
+                    db.query(User.id).filter(User.telegram_user_id == str(chat_id))
+                ),
+                Job.status.in_(["collecting", "preview_ready"])
+            ).order_by(Job.created_at.desc()).first()
+            
+            if job:
+                answers = job.answers if isinstance(job.answers, dict) else {}
+                answers["template"] = data
+                job.answers = answers
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(job, "answers")
+                db.commit()
+                
+                # Proceed to finalization
+                reply = await handle_inbound(db, str(chat_id), "yes", telegram_username=username)
+                if reply and reply.startswith("__SEND_DOCUMENT__|"):
+                    parts = reply.split("|")
+                    if len(parts) == 3:
+                        await send_document_to_user(chat_id, parts[1], parts[2])
+                elif reply:
+                    await reply_text(chat_id, reply)
+            else:
+                await reply_text(chat_id, "❌ Session expired. Please type /reset to start over.")
         
         elif data == "payment_completed":
             # User claims they've paid - check their payment status

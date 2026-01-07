@@ -28,13 +28,18 @@ async def reply_text(chat_id: int | str, text: str, parse_mode: str = "Markdown"
     }
 
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             r = await client.post(url, json=payload)
             if r.status_code >= 400:
                 logger.error(f"Telegram send text failed: {r.status_code} {r.text}")
+            else:
+                logger.info(f"[telegram] Message sent successfully to {chat_id}")
             return r.json() if r.content else {}
+    except httpx.TimeoutException as e:
+        logger.error(f"Telegram send text timeout after 60s: {e}")
+        return {"error": "timeout"}
     except Exception as e:
-        logger.error(f"Telegram send text exception: {e}")
+        logger.error(f"Telegram send text exception: {type(e).__name__}: {e}")
         return {"error": str(e)}
 
 
@@ -214,10 +219,70 @@ async def send_typing_action(chat_id: int | str):
     }
 
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             await client.post(url, json=payload)
     except Exception as e:
-        logger.error(f"[telegram] Send typing action exception: {e}")
+        logger.warning(f"[telegram] Send typing action failed (non-critical): {type(e).__name__}")
+
+
+async def send_template_selection(chat_id: int | str, user_tier: str) -> dict:
+    """
+    Send template selection menu with inline keyboard (premium users only).
+    
+    Args:
+        chat_id: Telegram chat ID
+        user_tier: User's tier (free or pro)
+    
+    Returns:
+        Response JSON from Telegram API
+    """
+    message = """🎨 *Choose Your Template*
+
+Select a professional template for your document:
+
+*Template 1* - Classic Professional
+Clean, traditional layout
+
+*Template 2* - Modern Minimal
+Contemporary design with side sections
+
+*Template 3* - Executive Bold  
+Stand-out format for leadership roles
+
+_All templates are ATS-compliant and professionally formatted._"""
+
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "📄 Template 1 (Classic)", "callback_data": "template_1"}
+            ],
+            [
+                {"text": "📋 Template 2 (Modern)", "callback_data": "template_2"}
+            ],
+            [
+                {"text": "✨ Template 3 (Executive)", "callback_data": "template_3"}
+            ]
+        ]
+    }
+    
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "Markdown",
+        "reply_markup": keyboard
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            r = await client.post(url, json=payload)
+            if r.status_code >= 400:
+                logger.error(f"Telegram send template selection failed: {r.status_code} {r.text}")
+            return r.json() if r.content else {}
+    except Exception as e:
+        logger.error(f"Telegram send template selection exception: {e}")
+        return {"error": str(e)}
 
 
 async def send_payment_request(chat_id: int | str, payment_url: str, amount: int) -> dict:
