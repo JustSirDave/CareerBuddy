@@ -45,8 +45,7 @@ def upgrade() -> None:
     # Create index and unique constraint
     op.create_index('ix_users_telegram_user_id', 'users', ['telegram_user_id'], unique=False)
     op.create_unique_constraint('uq_users_telegram_user_id', 'users', ['telegram_user_id'])
-    
-    # Drop old wa_id constraint and column
+        # Drop old wa_id constraint and column
     op.drop_constraint('users_wa_id_key', 'users', type_='unique')
     op.drop_column('users', 'wa_id')
 

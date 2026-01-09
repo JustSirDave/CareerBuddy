@@ -2,6 +2,7 @@
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException, Depends
 from loguru import logger
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.services.idempotency import seen_or_mark
@@ -40,6 +41,14 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
         logger.warning(f"[telegram_webhook] Duplicate msg_id={msg_id} from chat_id={chat_id}, skipping")
         return {"ok": True}
 
+    # Check if message contains a document (for edited .docx uploads)
+    message = payload.get("message", {})
+    document = message.get("document")
+    if document and document.get("mime_type") in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"]:
+        # User uploaded a .docx file - store it for PDF conversion
+        await handle_document_upload(chat_id, document, db)
+        return {"ok": True}
+
     # Show typing indicator while processing
     await send_typing_action(chat_id)
 
@@ -69,6 +78,12 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
         if len(parts) == 3:
             _, job_id, filename = parts
             await send_document_to_user(chat_id, job_id, filename)
+        return {"ok": True}
+
+    # Check if PDF should be sent
+    if reply and reply.startswith("__SEND_PDF__|"):
+        pdf_path_str = reply.split("|")[1]
+        await send_pdf_to_user(chat_id, pdf_path_str)
         return {"ok": True}
 
     # Check if template selection menu should be shown
@@ -104,6 +119,68 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
     return {"ok": True}
 
 
+async def handle_document_upload(chat_id: int | str, document: dict, db: Session):
+    """
+    Handle uploaded .docx document from user for PDF conversion.
+    
+    Args:
+        chat_id: Telegram chat ID
+        document: Telegram document object
+        db: Database session
+    """
+    try:
+        import httpx
+        from app.config import settings
+        from app.models import User
+        
+        # Get file info
+        file_id = document.get("file_id")
+        file_name = document.get("file_name", "edited_document.docx")
+        
+        # Download file from Telegram
+        async with httpx.AsyncClient() as client:
+            # Get file path
+            file_info_resp = await client.get(
+                f"https://api.telegram.org/bot{settings.telegram_bot_token}/getFile",
+                params={"file_id": file_id}
+            )
+            file_info = file_info_resp.json()
+            
+            if not file_info.get("ok"):
+                await reply_text(chat_id, "❌ Failed to download your document. Please try again.")
+                return
+            
+            file_path = file_info["result"]["file_path"]
+            
+            # Download the file
+            file_resp = await client.get(
+                f"https://api.telegram.org/file/bot{settings.telegram_bot_token}/{file_path}"
+            )
+            file_bytes = file_resp.content
+        
+        # Save the uploaded document
+        from pathlib import Path
+        user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
+        if user:
+            upload_dir = Path("output") / "uploads" / str(user.id)
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            
+            upload_path = upload_dir / file_name
+            upload_path.write_bytes(file_bytes)
+            
+            logger.info(f"[handle_document_upload] Saved uploaded document: {upload_path}")
+            
+            await reply_text(chat_id, 
+                            f"✅ *Document Received!*\n\n"
+                            f"📄 File: {file_name}\n\n"
+                            f"Ready to convert to PDF?\n"
+                            f"Type */pdf* or *convert to pdf* to get your final PDF!")
+    
+    except Exception as e:
+        logger.error(f"[handle_document_upload] Error: {e}")
+        await reply_text(chat_id, "❌ Sorry, there was an error processing your document. Please try again.")
+
+
 async def send_document_to_user(chat_id: int | str, job_id: str, filename: str):
     """
     Send the generated document to the user via Telegram.
@@ -122,20 +199,28 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str):
             await reply_text(chat_id, "❌ Sorry, your document could not be found. Please try again.")
             return
 
-        # Send document directly
+        # Send document as .docx for review
         file_bytes = file_path.read_bytes()
-        send_resp = await send_document(chat_id, file_bytes, filename, caption="Here's your document! 📄")
+        send_resp = await send_document(chat_id, file_bytes, filename, caption="📄 *Your Document is Ready!*")
 
         if send_resp and not send_resp.get("error"):
             logger.info(f"[telegram_webhook] Document sent to {chat_id}: {filename}")
-            success_msg = """✅ *Document Delivered!*
+            success_msg = """✅ *Document Delivered as .docx for Review!*
 
-Your professional document is ready to use!
+📝 *Review & Edit:*
+• Download the document
+• Open in Microsoft Word or Google Docs
+• Make any changes you want
+• Save your edits
 
-*📋 What's Next?*
-• Review and customize it
-• Download and print  
-• Share with recruiters
+📤 *Convert to PDF (Final Format):*
+When you're happy with your edits:
+1. Send the edited .docx file back to me
+2. Type *convert to pdf* or */pdf*
+3. I'll convert it to PDF for you!
+
+Or if you're happy with it as is:
+• Type */pdf* to convert the current version to PDF
 
 *🔄 Need Another Document?*
 Type /reset to create a new one
@@ -166,6 +251,56 @@ Reply /reset to create another document."""
     except Exception as e:
         logger.error(f"[telegram_webhook] Error sending document: {e}")
         await reply_text(chat_id, "❌ Sorry, something went wrong. Please try again.")
+
+
+async def send_pdf_to_user(chat_id: int | str, pdf_path_str: str):
+    """
+    Send the converted PDF document to the user via Telegram.
+    
+    Args:
+        chat_id: Telegram chat ID
+        pdf_path_str: Path to the PDF file as string
+    """
+    try:
+        from pathlib import Path
+        
+        pdf_path = Path(pdf_path_str)
+        
+        if not pdf_path.exists():
+            logger.error(f"[send_pdf_to_user] PDF file not found: {pdf_path}")
+            await reply_text(chat_id, "❌ Sorry, your PDF could not be found. Please try again.")
+            return
+        
+        # Send PDF
+        file_bytes = pdf_path.read_bytes()
+        filename = pdf_path.name
+        send_resp = await send_document(chat_id, file_bytes, filename, caption="📄 *Your Final PDF is Ready!*")
+        
+        if send_resp and not send_resp.get("error"):
+            logger.info(f"[send_pdf_to_user] PDF sent to {chat_id}: {filename}")
+            success_msg = """✅ *PDF Conversion Complete!*
+
+Your professional document is now in PDF format - ready to use!
+
+*📋 What's Next?*
+• Download and save your PDF
+• Print for physical copies
+• Email to recruiters and employers
+• Upload to job boards
+
+*🔄 Need Another Document?*
+Type /reset to create a new one
+Type /status to check your plan
+
+Good luck with your applications! 🚀"""
+            await reply_text(chat_id, success_msg)
+        else:
+            logger.error(f"[send_pdf_to_user] Failed to send PDF: {send_resp}")
+            await reply_text(chat_id, "❌ Sorry, there was an error sending your PDF. Please try again.")
+            
+    except Exception as e:
+        logger.error(f"[send_pdf_to_user] Error: {e}")
+        await reply_text(chat_id, "❌ Sorry, there was an error processing your PDF. Please try again.")
 
 
 async def handle_callback_query(callback_query: dict, db):

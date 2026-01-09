@@ -126,7 +126,7 @@ def _render_template_1(answers: dict) -> bytes:
     name_run.font.size = Pt(24)  # Increased from 20pt
     name_run.font.bold = True
     name_run.font.name = 'Calibri'
-    name_para.space_after = Pt(1)  # Consistent 1pt spacing
+    name_para.space_after = Pt(0)  # Tighter spacing
 
     # Title (Centered, ALL CAPS) - Increased font size
     title_para = doc.add_paragraph()
@@ -134,7 +134,7 @@ def _render_template_1(answers: dict) -> bytes:
     title_run = title_para.add_run(title.upper())  # ALL CAPS
     title_run.font.size = Pt(14)  # Increased from 12pt
     title_run.font.name = 'Calibri'
-    title_para.space_after = Pt(1)  # Consistent 1pt spacing
+    title_para.space_after = Pt(0)  # Tighter spacing
 
     # Contact Info - NO ICONS, pipe separators - Calibri 12pt
     contact_parts = []
@@ -151,7 +151,7 @@ def _render_template_1(answers: dict) -> bytes:
         contact_run = contact_para.add_run(' | '.join(contact_parts))
         contact_run.font.size = Pt(13)  # Increased from 12pt
         contact_run.font.name = 'Calibri'
-        contact_para.space_after = Pt(1)  # Consistent 1pt spacing
+        contact_para.space_after = Pt(0)  # Tighter spacing
 
     # Add horizontal line after header
     _add_horizontal_line(doc)

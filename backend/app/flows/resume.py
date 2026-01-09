@@ -21,30 +21,84 @@ QUESTIONS = {
         "• Backend Engineer\n"
         "• Marketing Manager"
     ),
-    "experience": (
+    "experiences": (
         "💼 *Step 3: Work Experience*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "Let's add your work experience.\n\n"
         "*Format:* Role, Company, City, Start (MMM YYYY), End (MMM YYYY or Present)\n\n"
         "*Example:* Backend Engineer, TechCorp, Lagos, Jan 2020, Present\n\n"
-        "Next, you'll add 2–4 bullet points about your achievements."
+        "Type *done* when you've added all experiences."
+    ),
+    "experience_bullets": (
+        "📌 *Achievement Bullets*\n\n"
+        "Send 2–4 bullet points describing your *achievements* for this role.\n"
+        "Focus on quantifiable results!\n\n"
+        "*Examples:*\n"
+        "• Increased sales by 40% through strategic marketing campaigns\n"
+        "• Led team of 5 to deliver project 2 weeks ahead of schedule\n\n"
+        "Send one bullet per message, or type *done* when finished."
+    ),
+    "skills": (
+        "💡 *Step 4: Skills*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "✨ Generating AI-powered skill suggestions based on your role and experience...\n\n"
+        "Please wait a moment..."
     ),
     "education": (
-        "🎓 *Step 4: Education*\n"
+        "🎓 *Step 5: Education*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "*Format:* Degree, School, Year\n\n"
         "*Example:* B.Sc. Computer Science, University of Lagos, 2020\n\n"
         "You can add multiple—send one per message, or type *done* when finished."
     ),
-    "extras": (
-        "⭐ *Step 5: Additional Info*\n"
+    "certifications": (
+        "🎖️ *Certifications*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Almost done! Any projects, certifications, or volunteer work?\n\n"
+        "Do you have any professional certifications or courses?\n\n"
         "*Examples:*\n"
-        "• Built an e-commerce platform using React\n"
         "• AWS Certified Solutions Architect\n"
-        "• Volunteer coding instructor\n\n"
-        "Send one per message, or type *done* to finish."
+        "• Google Data Analytics Professional Certificate\n"
+        "• PMP Certification\n"
+        "• Certified Scrum Master\n\n"
+        "Send one per message, or type *done* or *skip* to continue."
+    ),
+    "profiles": (
+        "🔗 *Profile Links*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Add your professional profile links (optional).\n\n"
+        "*Format:* Platform, URL\n\n"
+        "*Examples:*\n"
+        "• LinkedIn, https://linkedin.com/in/yourname\n"
+        "• GitHub, https://github.com/yourname\n"
+        "• Portfolio, https://yourportfolio.com\n\n"
+        "Send one per message, or type *done* or *skip* to finish."
+    ),
+    "projects": (
+        "🚀 *Projects*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Any notable projects or volunteer work?\n\n"
+        "*Examples:*\n"
+        "• Built an e-commerce platform using React and Node.js\n"
+        "• Developed a machine learning model for customer churn prediction\n"
+        "• Volunteer coding instructor at local community center\n\n"
+        "Send one per message, or type *done* or *skip* to finish."
+    ),
+    "personal_info": (
+        "🌟 *Tell Me About Yourself*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Share a bit about yourself to help AI generate your professional summary!\n\n"
+        "Tell me about:\n"
+        "• Your personality and work style\n"
+        "• Key experiences or achievements\n"
+        "• What makes you unique\n\n"
+        "*Example:* Detail-oriented Data Analyst with 5+ years of experience. I love solving complex problems and have helped companies increase revenue by 40%. I work well in teams and specialize in Python and SQL.\n\n"
+        "Or type *skip* to let AI generate summary from your profile alone."
+    ),
+    "summary": (
+        "📝 *Step 9: Professional Summary*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "✨ Generating your AI-powered professional summary...\n\n"
+        "Please wait a moment..."
     ),
 }
 
@@ -208,3 +262,66 @@ def validate_basics(basics: Dict) -> bool:
 def validate_experience(exp: Dict) -> bool:
     """Check if experience has minimum required fields."""
     return bool(exp.get("role") and exp.get("company"))
+
+
+def parse_profile(line: str) -> Dict:
+    """
+    Parse: Platform, URL
+    Example: LinkedIn, https://linkedin.com/in/yourname
+    """
+    parts = _split_commas(line)
+    if len(parts) < 2:
+        return None
+    
+    platform = parts[0].strip()
+    url = parts[1].strip()
+    
+    if not platform or not url:
+        return None
+    
+    return {
+        "platform": platform,
+        "url": url
+    }
+
+
+def parse_education(line: str) -> Dict:
+    """
+    Parse: Degree, School, Year
+    Example: B.Sc. Computer Science, University of Lagos, 2020
+    """
+    parts = _split_commas(line)
+    if len(parts) < 3:
+        return None
+    
+    degree = parts[0].strip()
+    school = parts[1].strip()
+    year = parts[2].strip()
+    
+    if not degree or not school:
+        return None
+    
+    return {
+        "degree": degree,
+        "institution": school,
+        "years": year,
+        "city": "",  # Optional, can be added later
+        "degree_type": ""  # Optional, can be added later
+    }
+
+
+def parse_experience(line: str) -> Dict:
+    """
+    Parse experience header: Role, Company, City, Start, End
+    Example: Backend Engineer, TechCorp, Lagos, Jan 2020, Present
+    """
+    return parse_experience_header(line)
+
+
+def parse_project(line: str) -> Dict:
+    """
+    Parse project entry.
+    """
+    return {
+        "details": line.strip()
+    }

@@ -24,6 +24,7 @@ RESETS = {"reset", "/reset", "restart"}
 HELP_COMMANDS = {"/help", "help"}
 STATUS_COMMANDS = {"/status", "status"}
 ADMIN_COMMANDS = {"/admin", "/stats", "/broadcast", "/sample"}
+PDF_COMMANDS = {"/pdf", "pdf", "convert to pdf", "convert pdf"}
 FORCE_LOWER = lambda s: (s or "").strip().lower()
 
 
@@ -187,6 +188,84 @@ def _format_preview(answers: dict) -> str:
     return "\n".join(lines)
 
 
+async def convert_to_pdf(db: Session, user: User, telegram_user_id: str) -> str:
+    """
+    Convert the most recent .docx document to PDF for the user.
+    
+    Args:
+        db: Database session
+        user: User object
+        telegram_user_id: Telegram user ID
+    
+    Returns:
+        Message to send to user
+    """
+    from pathlib import Path
+    import subprocess
+    
+    try:
+        # Check for uploaded document first
+        upload_dir = Path("output") / "uploads" / str(user.id)
+        if upload_dir.exists():
+            docx_files = list(upload_dir.glob("*.docx"))
+            if docx_files:
+                # Use the most recent uploaded file
+                docx_path = max(docx_files, key=lambda p: p.stat().st_mtime)
+            else:
+                # No uploaded file, find generated document
+                docx_path = None
+        else:
+            docx_path = None
+        
+        # If no uploaded file, find the most recent generated document
+        if not docx_path:
+            jobs_dir = Path("output") / "jobs"
+            if jobs_dir.exists():
+                all_docx = []
+                for job_dir in jobs_dir.iterdir():
+                    if job_dir.is_dir():
+                        all_docx.extend(job_dir.glob("*.docx"))
+                
+                if all_docx:
+                    docx_path = max(all_docx, key=lambda p: p.stat().st_mtime)
+                else:
+                    return ("❌ *No Document Found*\n\n"
+                            "Please generate a document first using /start, or upload your edited .docx file.")
+            else:
+                return ("❌ *No Document Found*\n\n"
+                        "Please generate a document first using /start.")
+        
+        # Convert to PDF using LibreOffice (available in most Docker images)
+        pdf_path = docx_path.with_suffix('.pdf')
+        
+        try:
+            # Try using LibreOffice for conversion (if available)
+            result = subprocess.run(
+                ['libreoffice', '--headless', '--convert-to', 'pdf', '--outdir', str(docx_path.parent), str(docx_path)],
+                capture_output=True,
+                timeout=30
+            )
+            
+            if result.returncode != 0 or not pdf_path.exists():
+                logger.error(f"[convert_to_pdf] LibreOffice conversion failed: {result.stderr}")
+                return ("❌ *PDF Conversion Failed*\n\n"
+                        "Sorry, PDF conversion is temporarily unavailable. Please download the .docx file and convert it manually.")
+            
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            logger.error(f"[convert_to_pdf] Conversion error: {e}")
+            return ("❌ *PDF Conversion Not Available*\n\n"
+                    "Sorry, PDF conversion requires LibreOffice which is not installed. Please download the .docx file.")
+        
+        # Send the PDF
+        logger.info(f"[convert_to_pdf] PDF created: {pdf_path}")
+        return f"__SEND_PDF__|{pdf_path}"
+        
+    except Exception as e:
+        logger.error(f"[convert_to_pdf] Error: {e}")
+        return ("❌ *Conversion Error*\n\n"
+                "Sorry, something went wrong during PDF conversion. Please try again or contact support.")
+
+
 def _format_cover_preview(answers: dict) -> str:
     """Format preview for cover letter data."""
     basics = answers.get("basics", {})
@@ -286,6 +365,7 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
     answers = job.answers or resume_flow.start_context()
     step = FORCE_LOWER(answers.get("_step") or "basics")
     t = (text or "").strip()
+    t_lower = t.lower()
     logger.info(f"[resume] step={step} text='{t[:80]}' tier={user_tier}")
 
     # ---- BASICS ----
@@ -313,7 +393,7 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         answers["basics"]["title"] = t.strip()
 
         _advance(db, job, answers, "experience_header")
-        return resume_flow.QUESTIONS["experience"]
+        return resume_flow.QUESTIONS["experiences"]
 
     # ---- EXPERIENCE HEADER ----
     if step == "experience_header":
@@ -340,7 +420,7 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         exps = list(answers.get("experiences", []))
         if not exps:
             _advance(db, job, answers, "experience_header")
-            return resume_flow.QUESTIONS["experience"]
+            return resume_flow.QUESTIONS["experiences"]
 
         if lt == "done" or lt == "skip":
             _advance(db, job, answers, "add_another_experience")
@@ -361,99 +441,207 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         lt = t.lower()
         if lt in {"yes", "y", "add", "add another"}:
             _advance(db, job, answers, "experience_header")
-            return resume_flow.QUESTIONS["experience"]
+            return resume_flow.QUESTIONS["experiences"]
 
         _advance(db, job, answers, "education")
         return resume_flow.QUESTIONS["education"]
 
     # ---- EDUCATION ----
     if step == "education":
-        if not t or t.lower() == "skip":
-            _advance(db, job, answers, "extras")
-            return resume_flow.QUESTIONS["extras"]
+        if t_lower in {"done", "skip"}:
+            if not answers.get("education"):
+                return "Please add at least one education entry, or type *skip* to continue."
+            _advance(db, job, answers, "certifications")
+            return resume_flow.QUESTIONS["certifications"]
 
+        parsed = resume_flow.parse_education(t)
+        if not parsed:
+            return ("❌ *Invalid format!*\n\n"
+                    "Please use: *Degree, School, Year*\n\n"
+                    "*Example:* B.Sc. Computer Science, University of Lagos, 2020")
+        
         edus = list(answers.get("education", []))
-        edus.append({"details": t})
+        edus.append(parsed)
         answers["education"] = edus
         job.answers = answers
         flag_modified(job, "answers")
         db.commit()
-        return "Added. Send another or *skip*."
+        return "✅ Added. Send another or type *done* to continue."
 
-    # ---- EXTRAS ----
-    if step == "extras":
-        lt = t.lower()
-        if not t or lt in {"done", "skip"}:
-            # Advance to AI skills generation
+    # ---- CERTIFICATIONS ----
+    if step == "certifications":
+        if t_lower in {"done", "skip"}:
+            _advance(db, job, answers, "profiles")
+            return resume_flow.QUESTIONS["profiles"]
+        
+        if not t:
+            return resume_flow.QUESTIONS["certifications"]
+        
+        certs = list(answers.get("certifications", []))
+        certs.append({"details": t})
+        answers["certifications"] = certs
+        job.answers = answers
+        flag_modified(job, "answers")
+        db.commit()
+        return "✅ Added. Send another certification or type *done* to continue."
+
+    # ---- PROFILES ----
+    if step == "profiles":
+        if t_lower in {"done", "skip"}:
+            _advance(db, job, answers, "projects")
+            return resume_flow.QUESTIONS["projects"]
+        
+        if not t:
+            return resume_flow.QUESTIONS["profiles"]
+        
+        parsed = resume_flow.parse_profile(t)
+        if not parsed:
+            return ("❌ *Invalid format!*\n\n"
+                    "Please use: *Platform, URL*\n\n"
+                    "*Examples:*\n"
+                    "• LinkedIn, https://linkedin.com/in/yourname\n"
+                    "• GitHub, https://github.com/yourname")
+        
+        profiles = list(answers.get("profiles", []))
+        profiles.append(parsed)
+        answers["profiles"] = profiles
+        job.answers = answers
+        flag_modified(job, "answers")
+        db.commit()
+        return "✅ Added. Send another profile or type *done* to continue."
+
+    # ---- PROJECTS ----
+    if step == "projects":
+        if t_lower in {"done", "skip"}:
+            # Advance to skills
             _advance(db, job, answers, "skills")
             step = "skills"
             # Fall through to skills below
         else:
+            if not t:
+                return resume_flow.QUESTIONS["projects"]
+            
             projs = list(answers.get("projects", []))
             projs.append({"details": t})
             answers["projects"] = projs
             job.answers = answers
             flag_modified(job, "answers")
             db.commit()
-            return "Got it. Add more or type *done*."
+            return "✅ Added. Send another project or type *done* to continue."
 
-    # ---- SKILLS (SIMPLIFIED - NO AI DELAY) ----
+    # ---- SKILLS (AI-GENERATED WITH NUMBER SELECTION) ----
     if step == "skills":
+        # Check if AI skills were already generated
+        ai_skills = answers.get("ai_suggested_skills", [])
+        
+        if not ai_skills:
+            # Generate AI skills on first entry
+            try:
+                target_role = answers.get("target_role", "")
+                experiences = answers.get("experiences", [])
+                basics = answers.get("basics", {})
+                
+                # Generate 5-8 skill suggestions
+                suggested_skills = ai.generate_skills(target_role, basics, experiences, tier=user_tier)
+                suggested_skills = suggested_skills[:8]  # Limit to 8
+                
+                # Store in answers
+                answers["ai_suggested_skills"] = suggested_skills
+                job.answers = answers
+                flag_modified(job, "answers")
+                db.commit()
+                
+                # Return formatted selection menu
+                return resume_flow.format_skills_selection(suggested_skills)
+                
+            except Exception as e:
+                logger.error(f"[skills] AI generation failed: {e}")
+                # Fallback to manual entry
+                return ("⚠️ AI skills generation unavailable.\n\n"
+                        "💡 *List your top 5-8 skills* (comma-separated)\n\n"
+                        "*Example:* Python, Data Analysis, SQL, Communication")
+        
+        # User is selecting from AI skills
         if not t:
-            return ("💡 *List your top 5-8 skills* (comma-separated)\n\n"
-                    "*Example:* Python, Data Analysis, SQL, Communication, Project Management\n\n"
-                    "_AI will enhance these when generating your document!_")
+            # Show the skills again
+            return resume_flow.format_skills_selection(ai_skills)
         
-        # Parse skills from user input
-        skills = [s.strip() for s in t.split(',') if s.strip()]
+        # Parse user selection (numbers or custom skills)
+        selected_skills = resume_flow.parse_skill_selection(t, ai_skills)
         
-        if not skills or len(skills) < 3:
-            return ("Please list at least 3 skills, comma-separated.\n\n"
-                    "*Example:* Python, Data Analysis, SQL")
+        if not selected_skills or len(selected_skills) < 3:
+            return ("❌ *Invalid selection!*\n\n"
+                    "Please enter skill numbers (comma-separated):\n"
+                    "*Example:* 1,3,5,7\n\n"
+                    "Or type your own skills (comma-separated).\n"
+                    "Need at least 3 skills.")
         
-        answers["skills"] = skills[:8]  # Take max 8
-        _advance(db, job, answers, "summary")
-        
-        # Ask for summary (AI will enhance during generation)
-        return ("✨ *Professional Summary*\n\n"
-                "Write 2-3 sentences about yourself, or type *skip* for AI to generate one.\n\n"
-                "*Example:* Data Analyst with 5+ years building dashboards and insights. Skilled in Python and SQL.")
-
-    # ---- SUMMARY (SIMPLIFIED) ----
-    if step == "summary":
-        if not t:
-            return ("Please provide a 2-3 sentence professional summary, or type *skip*.\n\n"
-                    "*Example:* Data Analyst with 5+ years building dashboards.")
-        
-        if t.lower() in {"skip", "no", "generate"}:
-            answers["summary"] = ""  # AI will generate during rendering
-        else:
-            answers["summary"] = t
-        
-        # Move to personal info collection before preview
+        answers["skills"] = selected_skills
         _advance(db, job, answers, "personal_info")
-        return ("📝 *Tell me about yourself!*\n\n"
-                "Share a bit about your personality, work style, or what makes you unique.\n"
-                "This helps me write a better professional summary.\n\n"
-                "*Example:* I'm detail-oriented, love solving complex problems, and work well in teams.\n\n"
-                "Or type *skip* to use what you've provided.")
+        
+        # Move to personal_info before generating summary
+        return resume_flow.QUESTIONS["personal_info"]
 
-    # ---- PERSONAL INFO (for better summary generation) ----
+    # ---- SUMMARY (AI-GENERATED, REQUIRED) ----
+    if step == "summary":
+        # Check if summary was already generated
+        if not answers.get("summary"):
+            # Generate AI summary
+            try:
+                summary = ai.generate_summary(answers, tier=user_tier)
+                answers["summary"] = summary
+                job.answers = answers
+                flag_modified(job, "answers")
+                db.commit()
+                
+                return (f"✨ *AI-Generated Professional Summary:*\n\n"
+                        f"{summary}\n\n"
+                        f"━━━━━━━━━━━━━━━━\n\n"
+                        f"✅ Happy with this? Type *yes* to continue.\n"
+                        f"Or send your own summary to replace it.")
+                
+            except Exception as e:
+                logger.error(f"[summary] AI generation failed: {e}")
+                return ("⚠️ AI summary generation unavailable.\n\n"
+                        "Please write a 2-3 sentence professional summary:\n\n"
+                        "*Example:* Data Analyst with 5+ years building dashboards.")
+        
+        # User can edit the summary or accept it
+        if t_lower in {"yes", "y", "ok", "okay", "good", "done"}:
+            # Accept the AI-generated summary
+            pass
+        elif t:
+            # User provided their own summary
+            answers["summary"] = t
+            job.answers = answers
+            flag_modified(job, "answers")
+            db.commit()
+        else:
+            # Show the generated summary again
+            return (f"✨ *Your Professional Summary:*\n\n"
+                    f"{answers['summary']}\n\n"
+                    f"Type *yes* to accept, or send your own summary.")
+        
+        # Move to preview/review
+        _advance(db, job, answers, "preview")
+        preview_text = _format_preview(answers)
+        return f"{preview_text}\n\n✅ Reply *yes* to generate your document or */reset* to start over!"
+
+    # ---- PERSONAL INFO (BEFORE SUMMARY) ----
     if step == "personal_info":
         if not t:
-            return ("Please share something about yourself, or type *skip*.\n\n"
-                    "*Example:* I'm detail-oriented and love problem-solving.")
+            return resume_flow.QUESTIONS["personal_info"]
         
-        if t.lower() not in {"skip", "no"}:
+        if t_lower not in {"skip"}:
             answers["personal_traits"] = t
             job.answers = answers
             flag_modified(job, "answers")
             db.commit()
         
-        # Move to preview
-        _advance(db, job, answers, "preview")
-        preview_text = _format_preview(answers)
-        return f"{preview_text}\n\n✅ Reply *yes* to generate your document!"
+        # Move to summary generation (using personal_info)
+        _advance(db, job, answers, "summary")
+        step = "summary"
+        # Fall through to summary generation
 
     # ---- PREVIEW ----
     if step == "preview":
@@ -1209,6 +1397,11 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         
         status_msg += "\nReady to create? Type /start!"
         return status_msg
+
+    # 1.8) PDF conversion command
+    if t_lower in PDF_COMMANDS or "convert" in t_lower and "pdf" in t_lower:
+        logger.info(f"[handle_inbound] Processing /pdf command for user {telegram_user_id}")
+        return await convert_to_pdf(db, user, telegram_user_id)
 
     # 2) Reset/menu
     if t_lower in RESETS:
