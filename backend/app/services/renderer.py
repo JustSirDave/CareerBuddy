@@ -244,7 +244,7 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(12)  # Medium spacing
+        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
         label_run = label_para.add_run('Summary')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
@@ -266,7 +266,7 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(12)  # Medium spacing
+        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
         label_run = label_para.add_run('Experience')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
@@ -347,7 +347,7 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(12)  # Medium spacing
+        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
         label_run = label_para.add_run('Education')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
@@ -406,7 +406,7 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(12)  # Medium spacing
+        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
         label_run = label_para.add_run('Projects')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
@@ -435,7 +435,7 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(12)  # Medium spacing
+        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
         label_run = label_para.add_run('References')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
@@ -477,7 +477,7 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(12)  # Medium spacing
+        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
         label_run = label_para.add_run('Skills')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
