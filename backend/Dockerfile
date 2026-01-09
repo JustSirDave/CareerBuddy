@@ -6,8 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # System deps (keep minimal; gcc only if needed later)
+# Install LibreOffice for PDF conversion
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential curl && rm -rf /var/lib/apt/lists/*
+    build-essential \
+    curl \
+    libreoffice-writer \
+    libreoffice-core \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy pyproject.toml and install dependencies
 COPY pyproject.toml ./
