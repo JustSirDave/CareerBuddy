@@ -82,8 +82,10 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
 
     # Check if PDF should be sent
     if reply and reply.startswith("__SEND_PDF__|"):
-        pdf_path_str = reply.split("|")[1]
-        await send_pdf_to_user(chat_id, pdf_path_str)
+        parts = reply.split("|")
+        if len(parts) >= 2:
+            user_id = parts[1]
+            await send_pdf_to_user(chat_id, user_id, db)
         return {"ok": True}
 
     # Check if template selection menu should be shown
@@ -101,13 +103,13 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
             _, role, amount_str = parts
             from app.services import payments
             from app.models import User
-            
+
             # Get user
             user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
             if user:
                 # Create payment link
                 payment_result = await payments.create_payment_link(user, role, int(amount_str))
-                
+
                 if payment_result.get("authorization_url"):
                     await send_payment_request(chat_id, payment_result["authorization_url"], int(amount_str))
                 else:
@@ -122,7 +124,7 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
 async def handle_document_upload(chat_id: int | str, document: dict, db: Session):
     """
     Handle uploaded .docx document from user for PDF conversion.
-    
+
     Args:
         chat_id: Telegram chat ID
         document: Telegram document object
@@ -132,11 +134,11 @@ async def handle_document_upload(chat_id: int | str, document: dict, db: Session
         import httpx
         from app.config import settings
         from app.models import User
-        
+
         # Get file info
         file_id = document.get("file_id")
         file_name = document.get("file_name", "edited_document.docx")
-        
+
         # Download file from Telegram
         async with httpx.AsyncClient() as client:
             # Get file path
@@ -145,37 +147,37 @@ async def handle_document_upload(chat_id: int | str, document: dict, db: Session
                 params={"file_id": file_id}
             )
             file_info = file_info_resp.json()
-            
+
             if not file_info.get("ok"):
                 await reply_text(chat_id, "❌ Failed to download your document. Please try again.")
                 return
-            
+
             file_path = file_info["result"]["file_path"]
-            
+
             # Download the file
             file_resp = await client.get(
                 f"https://api.telegram.org/file/bot{settings.telegram_bot_token}/{file_path}"
             )
             file_bytes = file_resp.content
-        
+
         # Save the uploaded document
         from pathlib import Path
         user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
         if user:
             upload_dir = Path("output") / "uploads" / str(user.id)
             upload_dir.mkdir(parents=True, exist_ok=True)
-            
+
             upload_path = upload_dir / file_name
             upload_path.write_bytes(file_bytes)
-            
+
             logger.info(f"[handle_document_upload] Saved uploaded document: {upload_path}")
-            
+
             await reply_text(chat_id, 
                             f"✅ *Document Received!*\n\n"
                             f"📄 File: {file_name}\n\n"
                             f"Ready to convert to PDF?\n"
                             f"Type */pdf* or *convert to pdf* to get your final PDF!")
-    
+
     except Exception as e:
         logger.error(f"[handle_document_upload] Error: {e}")
         await reply_text(chat_id, "❌ Sorry, there was an error processing your document. Please try again.")
@@ -253,31 +255,68 @@ Reply /reset to create another document."""
         await reply_text(chat_id, "❌ Sorry, something went wrong. Please try again.")
 
 
-async def send_pdf_to_user(chat_id: int | str, pdf_path_str: str):
+async def send_pdf_to_user(chat_id: int | str, user_id: str, db: Session):
     """
-    Send the converted PDF document to the user via Telegram.
+    Converts the latest .docx document for the user to PDF and sends it.
     
     Args:
         chat_id: Telegram chat ID
-        pdf_path_str: Path to the PDF file as string
+        user_id: User ID (from telegram_user_id)
+        db: Database session
     """
     try:
         from pathlib import Path
+        from app.services import storage
+        from app.models import User, Job
         
-        pdf_path = Path(pdf_path_str)
+        user = db.query(User).filter(User.telegram_user_id == str(user_id)).first()
+        if not user:
+            await reply_text(chat_id, "❌ User not found. Please start with /start.")
+            return
+
+        # Find the latest uploaded .docx or generated .docx
+        latest_docx_path = None
         
-        if not pdf_path.exists():
-            logger.error(f"[send_pdf_to_user] PDF file not found: {pdf_path}")
-            await reply_text(chat_id, "❌ Sorry, your PDF could not be found. Please try again.")
+        # Check for uploaded documents first
+        upload_dir = Path("output") / "uploads" / str(user.id)
+        if upload_dir.exists():
+            docx_files = sorted(upload_dir.glob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if docx_files:
+                latest_docx_path = docx_files[0]
+                logger.info(f"[send_pdf] Found latest uploaded docx: {latest_docx_path}")
+        
+        # If no uploaded docx, check for latest generated job docx
+        if not latest_docx_path:
+            latest_job = db.query(Job).filter(
+                Job.user_id == user.id, 
+                Job.status == "completed"
+            ).order_by(Job.created_at.desc()).first()
+            
+            if latest_job and latest_job.document_path:
+                job_docx_path = Path(latest_job.document_path)
+                if job_docx_path.exists():
+                    latest_docx_path = job_docx_path
+                    logger.info(f"[send_pdf] Found latest generated job docx: {latest_docx_path}")
+
+        if not latest_docx_path:
+            await reply_text(chat_id, "❌ No .docx document found to convert. Please generate a document first or upload an edited one.")
+            return
+
+        await send_typing_action(chat_id)
+        await reply_text(chat_id, "⚙️ *Converting to PDF...*\n\nThis may take a moment.")
+
+        # Convert DOCX to PDF
+        pdf_bytes, pdf_filename = storage.convert_docx_to_pdf(latest_docx_path)
+
+        if not pdf_bytes:
+            await reply_text(chat_id, "❌ Sorry, I couldn't convert your document to PDF. This feature requires LibreOffice to be installed on the server. Please try converting it manually or contact support.")
             return
         
         # Send PDF
-        file_bytes = pdf_path.read_bytes()
-        filename = pdf_path.name
-        send_resp = await send_document(chat_id, file_bytes, filename, caption="📄 *Your Final PDF is Ready!*")
+        send_resp = await send_document(chat_id, pdf_bytes, pdf_filename, caption="📄 *Your Final PDF is Ready!*")
         
         if send_resp and not send_resp.get("error"):
-            logger.info(f"[send_pdf_to_user] PDF sent to {chat_id}: {filename}")
+            logger.info(f"[send_pdf] PDF sent to {chat_id}: {pdf_filename}")
             success_msg = """✅ *PDF Conversion Complete!*
 
 Your professional document is now in PDF format - ready to use!
@@ -295,22 +334,22 @@ Type /status to check your plan
 Good luck with your applications! 🚀"""
             await reply_text(chat_id, success_msg)
         else:
-            logger.error(f"[send_pdf_to_user] Failed to send PDF: {send_resp}")
+            logger.error(f"[send_pdf] Failed to send PDF: {send_resp}")
             await reply_text(chat_id, "❌ Sorry, there was an error sending your PDF. Please try again.")
             
     except Exception as e:
-        logger.error(f"[send_pdf_to_user] Error: {e}")
+        logger.error(f"[send_pdf] Error: {e}")
         await reply_text(chat_id, "❌ Sorry, there was an error processing your PDF. Please try again.")
 
 
 async def handle_callback_query(callback_query: dict, db):
     """
     Handle inline keyboard button clicks (callback queries).
-    
+
     Args:
         callback_query: Callback query data from Telegram
         db: Database session
-    
+
     Returns:
         Response dict
     """
@@ -321,16 +360,16 @@ async def handle_callback_query(callback_query: dict, db):
         chat_id = message.get("chat", {}).get("id")
         from_user = callback_query.get("from", {})
         username = from_user.get("username")
-        
+
         logger.info(f"[callback_query] chat_id={chat_id}, data={data}")
-        
+
         # Answer callback query to stop loading indicator
         from app.services import telegram
         answer_url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/answerCallbackQuery"
         import httpx
         async with httpx.AsyncClient(timeout=10) as client:
             await client.post(answer_url, json={"callback_query_id": callback_id})
-        
+
         # Handle different callback actions
         if data == "plan_free":
             # User clicked "Start with Free Plan"
@@ -344,7 +383,7 @@ async def handle_callback_query(callback_query: dict, db):
                     await send_document_type_menu(chat_id, tier)
             elif reply:
                 await reply_text(chat_id, reply)
-        
+
         elif data == "learn_more":
             # Show more info about the service
             info_msg = """📚 *About Career Buddy*
@@ -370,7 +409,7 @@ I'm an AI-powered assistant that helps you create professional career documents 
 
 Ready to create? Type /start!"""
             await reply_text(chat_id, info_msg)
-        
+
         elif data.startswith("doc_"):
             # Document type selected
             doc_type = data.replace("doc_", "")
@@ -380,12 +419,12 @@ Ready to create? Type /start!"""
                 reply = await handle_inbound(db, str(chat_id), doc_type, telegram_username=username)
                 if reply:
                     await reply_text(chat_id, reply)
-        
+
         elif data.startswith("template_"):
             # Template selected
             template_num = data.replace("template_", "")
             logger.info(f"[callback_query] User {chat_id} selected {data}")
-            
+
             # Update job with template choice
             from app.models import Job
             job = db.query(Job).filter(
@@ -394,7 +433,7 @@ Ready to create? Type /start!"""
                 ),
                 Job.status.in_(["collecting", "preview_ready"])
             ).order_by(Job.created_at.desc()).first()
-            
+
             if job:
                 answers = job.answers if isinstance(job.answers, dict) else {}
                 answers["template"] = data
@@ -402,7 +441,7 @@ Ready to create? Type /start!"""
                 from sqlalchemy.orm.attributes import flag_modified
                 flag_modified(job, "answers")
                 db.commit()
-                
+
                 # Proceed to finalization
                 reply = await handle_inbound(db, str(chat_id), "yes", telegram_username=username)
                 if reply and reply.startswith("__SEND_DOCUMENT__|"):
@@ -413,7 +452,7 @@ Ready to create? Type /start!"""
                     await reply_text(chat_id, reply)
             else:
                 await reply_text(chat_id, "❌ Session expired. Please type /reset to start over.")
-        
+
         elif data == "payment_completed":
             # User claims they've paid - check their payment status
             await reply_text(chat_id, """✅ *Checking Payment Status...*
@@ -424,12 +463,12 @@ If payment is confirmed, you'll be able to continue creating your document.
 
 _This may take a few moments._""")
             # The actual payment verification happens via webhook
-            
+
         elif data == "cancel":
             await reply_text(chat_id, "❌ *Cancelled*\n\nNo problem! Type /start when you're ready to create a document.")
-        
+
         return {"ok": True}
-        
+
     except Exception as e:
         logger.error(f"[callback_query] Error handling callback: {e}")
         return {"ok": False, "error": str(e)}
@@ -470,7 +509,7 @@ def extract_telegram_message(payload: dict) -> tuple[int | None, str | None, int
     try:
         # Check if it's a message update
         message = payload.get("message")
-        
+
         if not message:
             # Could be edited_message, callback_query, etc.
             logger.debug(f"[telegram_webhook] Non-message update type, ignoring")
@@ -479,7 +518,7 @@ def extract_telegram_message(payload: dict) -> tuple[int | None, str | None, int
         # Extract chat ID
         chat = message.get("chat", {})
         chat_id = chat.get("id")
-        
+
         if not chat_id:
             logger.debug("[telegram_webhook] No chat_id found")
             return None, None, None, None
@@ -498,7 +537,7 @@ def extract_telegram_message(payload: dict) -> tuple[int | None, str | None, int
 
         # Extract message text
         text = message.get("text")
-        
+
         # Handle commands (convert to lowercase for consistency)
         if text and text.startswith("/"):
             # Keep commands like /start, /reset

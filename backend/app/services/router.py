@@ -190,7 +190,8 @@ def _format_preview(answers: dict) -> str:
 
 async def convert_to_pdf(db: Session, user: User, telegram_user_id: str) -> str:
     """
-    Convert the most recent .docx document to PDF for the user.
+    Trigger PDF conversion for the most recent .docx document.
+    The actual conversion is handled by send_pdf_to_user in webhook.py
     
     Args:
         db: Database session
@@ -198,72 +199,10 @@ async def convert_to_pdf(db: Session, user: User, telegram_user_id: str) -> str:
         telegram_user_id: Telegram user ID
     
     Returns:
-        Message to send to user
+        Marker string to trigger PDF conversion and sending
     """
-    from pathlib import Path
-    import subprocess
-    
-    try:
-        # Check for uploaded document first
-        upload_dir = Path("output") / "uploads" / str(user.id)
-        if upload_dir.exists():
-            docx_files = list(upload_dir.glob("*.docx"))
-            if docx_files:
-                # Use the most recent uploaded file
-                docx_path = max(docx_files, key=lambda p: p.stat().st_mtime)
-            else:
-                # No uploaded file, find generated document
-                docx_path = None
-        else:
-            docx_path = None
-        
-        # If no uploaded file, find the most recent generated document
-        if not docx_path:
-            jobs_dir = Path("output") / "jobs"
-            if jobs_dir.exists():
-                all_docx = []
-                for job_dir in jobs_dir.iterdir():
-                    if job_dir.is_dir():
-                        all_docx.extend(job_dir.glob("*.docx"))
-                
-                if all_docx:
-                    docx_path = max(all_docx, key=lambda p: p.stat().st_mtime)
-                else:
-                    return ("❌ *No Document Found*\n\n"
-                            "Please generate a document first using /start, or upload your edited .docx file.")
-            else:
-                return ("❌ *No Document Found*\n\n"
-                        "Please generate a document first using /start.")
-        
-        # Convert to PDF using LibreOffice (available in most Docker images)
-        pdf_path = docx_path.with_suffix('.pdf')
-        
-        try:
-            # Try using LibreOffice for conversion (if available)
-            result = subprocess.run(
-                ['libreoffice', '--headless', '--convert-to', 'pdf', '--outdir', str(docx_path.parent), str(docx_path)],
-                capture_output=True,
-                timeout=30
-            )
-            
-            if result.returncode != 0 or not pdf_path.exists():
-                logger.error(f"[convert_to_pdf] LibreOffice conversion failed: {result.stderr}")
-                return ("❌ *PDF Conversion Failed*\n\n"
-                        "Sorry, PDF conversion is temporarily unavailable. Please download the .docx file and convert it manually.")
-            
-        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-            logger.error(f"[convert_to_pdf] Conversion error: {e}")
-            return ("❌ *PDF Conversion Not Available*\n\n"
-                    "Sorry, PDF conversion requires LibreOffice which is not installed. Please download the .docx file.")
-        
-        # Send the PDF
-        logger.info(f"[convert_to_pdf] PDF created: {pdf_path}")
-        return f"__SEND_PDF__|{pdf_path}"
-        
-    except Exception as e:
-        logger.error(f"[convert_to_pdf] Error: {e}")
-        return ("❌ *Conversion Error*\n\n"
-                "Sorry, something went wrong during PDF conversion. Please try again or contact support.")
+    # Return marker with telegram_user_id for send_pdf_to_user
+    return f"__SEND_PDF__|{telegram_user_id}|placeholder"
 
 
 def _format_cover_preview(answers: dict) -> str:
