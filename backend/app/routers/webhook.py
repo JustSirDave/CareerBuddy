@@ -292,11 +292,15 @@ async def send_pdf_to_user(chat_id: int | str, user_id: str, db: Session):
                 Job.status == "completed"
             ).order_by(Job.created_at.desc()).first()
             
-            if latest_job and latest_job.document_path:
-                job_docx_path = Path(latest_job.document_path)
-                if job_docx_path.exists():
-                    latest_docx_path = job_docx_path
-                    logger.info(f"[send_pdf] Found latest generated job docx: {latest_docx_path}")
+            if latest_job:
+                # Look for docx files in the job's output directory
+                job_output_dir = Path("output") / "jobs" / latest_job.id
+                if job_output_dir.exists():
+                    docx_files = list(job_output_dir.glob("*.docx"))
+                    if docx_files:
+                        # Get the most recent docx file
+                        latest_docx_path = max(docx_files, key=lambda p: p.stat().st_mtime)
+                        logger.info(f"[send_pdf] Found latest generated job docx: {latest_docx_path}")
 
         if not latest_docx_path:
             await reply_text(chat_id, "❌ No .docx document found to convert. Please generate a document first or upload an edited one.")
