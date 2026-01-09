@@ -530,13 +530,14 @@ def _render_template_1(answers: dict) -> bytes:
 def _render_template_2(answers: dict) -> bytes:
     """
     Template 2: Modern Minimal Layout
-    - Side column for contact info and skills
-    - Main column for experience and education
-    - Clean, contemporary design
+    - Clean, contemporary design with accent colors
+    - ALL CAPS section headings in dark blue
+    - No icons, professional formatting
+    - Calibri font, refined spacing
     """
     doc = Document()
     
-    # Set narrower margins for two-column layout
+    # Set margins to match template 1
     sections = doc.sections
     for section in sections:
         section.top_margin = Inches(0.5)
@@ -547,129 +548,220 @@ def _render_template_2(answers: dict) -> bytes:
     # Get data
     basics = answers.get('basics', {})
     summary = answers.get('summary', '')
-    skills = _clean_skills(answers.get('skills', []))
+    skills = _clean_skills(answers.get('skills', []))[:6]  # Limit to 6 skills
     experiences = answers.get('experiences', [])
     education = answers.get('education', [])
+    profiles = answers.get('profiles', [])
+    certifications = answers.get('certifications', [])
+    projects = answers.get('projects', [])
     
-    # Header (name centered, larger)
+    # ==================== HEADER ====================
+    # Name (centered, large, dark blue)
     name = basics.get('name', 'Your Name')
     name_para = doc.add_paragraph()
     name_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     name_run = name_para.add_run(name.upper())
     name_run.bold = True
-    name_run.font.size = Pt(24)
+    name_run.font.size = Pt(26)
     name_run.font.name = 'Calibri'
     name_run.font.color.rgb = RGBColor(0, 51, 102)  # Dark blue
+    name_para.paragraph_format.space_after = Pt(2)
     
-    # Title
+    # Title (centered, gray)
     if basics.get('title'):
         title_para = doc.add_paragraph()
         title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
         title_run = title_para.add_run(basics['title'])
-        title_run.font.size = Pt(12)
+        title_run.font.size = Pt(13)
         title_run.font.name = 'Calibri'
-        title_run.font.color.rgb = RGBColor(100, 100, 100)
+        title_run.font.color.rgb = RGBColor(80, 80, 80)
+        title_para.paragraph_format.space_after = Pt(2)
     
-    # Contact info (centered)
-    contact_para = doc.add_paragraph()
-    contact_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Contact info (centered, no icons)
     contact_parts = []
-    if basics.get('phone'):
-        contact_parts.append(f"📞 {basics['phone']}")
-    if basics.get('email'):
-        contact_parts.append(f"✉ {basics['email']}")
     if basics.get('location'):
-        contact_parts.append(f"📍 {basics['location']}")
+        contact_parts.append(basics['location'])
+    if basics.get('phone'):
+        contact_parts.append(basics['phone'])
+    if basics.get('email'):
+        contact_parts.append(basics['email'])
     
-    contact_run = contact_para.add_run(' | '.join(contact_parts))
-    contact_run.font.size = Pt(9)
-    contact_run.font.name = 'Calibri'
+    if contact_parts:
+        contact_para = doc.add_paragraph()
+        contact_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        contact_run = contact_para.add_run(' | '.join(contact_parts))
+        contact_run.font.size = Pt(11)
+        contact_run.font.name = 'Calibri'
+        contact_run.font.color.rgb = RGBColor(60, 60, 60)
+        contact_para.paragraph_format.space_after = Pt(16)
     
-    doc.add_paragraph()  # Spacer
+    # Horizontal line separator
+    _add_horizontal_line(doc)
+    doc.add_paragraph().paragraph_format.space_after = Pt(12)
     
-    # Summary section
+    # ==================== PROFILES ====================
+    if profiles:
+        profiles_heading = doc.add_paragraph()
+        profiles_heading_run = profiles_heading.add_run('PROFILES')
+        profiles_heading_run.bold = True
+        profiles_heading_run.font.size = Pt(13)
+        profiles_heading_run.font.name = 'Calibri'
+        profiles_heading_run.font.color.rgb = RGBColor(0, 51, 102)
+        profiles_heading.paragraph_format.space_after = Pt(6)
+        
+        profiles_para = doc.add_paragraph()
+        for idx, profile in enumerate(profiles):
+            platform = profile.get('platform', 'Profile')
+            url = profile.get('url', '')
+            if platform and url:
+                if idx > 0:
+                    profiles_para.add_run(' | ')
+                _add_hyperlink(profiles_para, url, platform)
+        profiles_para.paragraph_format.space_after = Pt(14)
+    
+    # ==================== SUMMARY ====================
     if summary:
         summary_heading = doc.add_paragraph()
         summary_heading_run = summary_heading.add_run('PROFESSIONAL SUMMARY')
         summary_heading_run.bold = True
-        summary_heading_run.font.size = Pt(12)
+        summary_heading_run.font.size = Pt(13)
+        summary_heading_run.font.name = 'Calibri'
         summary_heading_run.font.color.rgb = RGBColor(0, 51, 102)
+        summary_heading.paragraph_format.space_after = Pt(6)
         
         summary_para = doc.add_paragraph(summary)
-        summary_para.paragraph_format.space_after = Pt(12)
+        summary_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        summary_para.paragraph_format.space_after = Pt(14)
         for run in summary_para.runs:
-            run.font.size = Pt(10)
+            run.font.size = Pt(11)
             run.font.name = 'Calibri'
     
-    # Skills section
+    # ==================== SKILLS ====================
     if skills:
         skills_heading = doc.add_paragraph()
         skills_heading_run = skills_heading.add_run('KEY SKILLS')
         skills_heading_run.bold = True
-        skills_heading_run.font.size = Pt(12)
+        skills_heading_run.font.size = Pt(13)
+        skills_heading_run.font.name = 'Calibri'
         skills_heading_run.font.color.rgb = RGBColor(0, 51, 102)
+        skills_heading.paragraph_format.space_after = Pt(6)
         
         skills_text = ' • '.join(skills)
         skills_para = doc.add_paragraph(skills_text)
-        skills_para.paragraph_format.space_after = Pt(12)
+        skills_para.paragraph_format.space_after = Pt(14)
         for run in skills_para.runs:
-            run.font.size = Pt(10)
+            run.font.size = Pt(11)
             run.font.name = 'Calibri'
     
-    # Experience section
+    # ==================== EXPERIENCE ====================
     if experiences:
         exp_heading = doc.add_paragraph()
         exp_heading_run = exp_heading.add_run('PROFESSIONAL EXPERIENCE')
         exp_heading_run.bold = True
-        exp_heading_run.font.size = Pt(12)
+        exp_heading_run.font.size = Pt(13)
+        exp_heading_run.font.name = 'Calibri'
         exp_heading_run.font.color.rgb = RGBColor(0, 51, 102)
+        exp_heading.paragraph_format.space_after = Pt(6)
         
-        for exp in experiences:
-            # Company and dates
+        for idx, exp in enumerate(experiences):
+            # Company (bold) and dates
             comp_para = doc.add_paragraph()
             comp_run = comp_para.add_run(exp.get('company', 'Company'))
             comp_run.bold = True
-            comp_run.font.size = Pt(11)
+            comp_run.font.size = Pt(12)
             comp_run.font.name = 'Calibri'
             
             dates = f"{exp.get('start', '')} - {exp.get('end', '')}"
-            if dates.strip() != '-':
+            if dates.strip() != ' - ':
                 comp_para.add_run(f"  |  {dates}")
+            comp_para.paragraph_format.space_after = Pt(2)
             
             # Title and location
             title_para = doc.add_paragraph()
-            title_run = title_para.add_run(exp.get('title', 'Position'))
+            title_run = title_para.add_run(exp.get('title', exp.get('role', 'Position')))
             title_run.italic = True
-            title_run.font.size = Pt(10)
+            title_run.font.size = Pt(11)
             title_run.font.name = 'Calibri'
             
-            if exp.get('city'):
-                title_para.add_run(f" - {exp['city']}")
+            location = exp.get('city', exp.get('location', ''))
+            if location:
+                title_para.add_run(f" – {location}")
+            title_para.paragraph_format.space_after = Pt(4)
             
             # Bullets
             for bullet in exp.get('bullets', []):
-                bullet_para = doc.add_paragraph(bullet, style='List Bullet')
-                bullet_para.paragraph_format.left_indent = Inches(0.25)
-                bullet_para.paragraph_format.space_after = Pt(3)
-                for run in bullet_para.runs:
-                    run.font.size = Pt(10)
-                    run.font.name = 'Calibri'
+                bullet_para = doc.add_paragraph()
+                bullet_para.paragraph_format.left_indent = Inches(0.2)
+                bullet_para.paragraph_format.first_line_indent = Inches(-0.15)
+                bullet_para.paragraph_format.space_after = Pt(2)
+                bullet_run = bullet_para.add_run(f"• {bullet}")
+                bullet_run.font.size = Pt(11)
+                bullet_run.font.name = 'Calibri'
             
-            doc.add_paragraph()  # Spacer between jobs
+            # Spacer between jobs
+            if idx < len(experiences) - 1:
+                doc.add_paragraph().paragraph_format.space_after = Pt(8)
+        
+        doc.add_paragraph().paragraph_format.space_after = Pt(6)
     
-    # Education section
+    # ==================== EDUCATION ====================
     if education:
         edu_heading = doc.add_paragraph()
         edu_heading_run = edu_heading.add_run('EDUCATION')
         edu_heading_run.bold = True
-        edu_heading_run.font.size = Pt(12)
+        edu_heading_run.font.size = Pt(13)
+        edu_heading_run.font.name = 'Calibri'
         edu_heading_run.font.color.rgb = RGBColor(0, 51, 102)
+        edu_heading.paragraph_format.space_after = Pt(6)
         
         for edu in education:
-            details = edu.get('details', '')
-            edu_para = doc.add_paragraph(f"• {details}")
-            for run in edu_para.runs:
-                run.font.size = Pt(10)
+            institution = edu.get('institution', 'Institution')
+            degree = edu.get('degree', '')
+            years = edu.get('years', '')
+            
+            edu_para = doc.add_paragraph()
+            edu_para.paragraph_format.space_after = Pt(4)
+            
+            # Institution and year
+            inst_run = edu_para.add_run(f"{institution}")
+            inst_run.bold = True
+            inst_run.font.size = Pt(11)
+            inst_run.font.name = 'Calibri'
+            
+            if years:
+                edu_para.add_run(f"  |  {years}")
+            
+            # Degree
+            if degree:
+                degree_para = doc.add_paragraph(degree)
+                degree_para.paragraph_format.space_after = Pt(6)
+                for run in degree_para.runs:
+                    run.font.size = Pt(11)
+                    run.font.name = 'Calibri'
+    
+    # ==================== CERTIFICATIONS ====================
+    if certifications:
+        cert_heading = doc.add_paragraph()
+        cert_heading_run = cert_heading.add_run('CERTIFICATIONS')
+        cert_heading_run.bold = True
+        cert_heading_run.font.size = Pt(13)
+        cert_heading_run.font.name = 'Calibri'
+        cert_heading_run.font.color.rgb = RGBColor(0, 51, 102)
+        cert_heading.paragraph_format.space_after = Pt(6)
+        
+        for cert in certifications:
+            cert_name = cert.get('name', '')
+            cert_body = cert.get('issuing_body', '')
+            cert_year = cert.get('year', '')
+            
+            cert_text = f"{cert_name}, {cert_body}"
+            if cert_year:
+                cert_text += f", {cert_year}"
+            
+            cert_para = doc.add_paragraph(f"• {cert_text}")
+            cert_para.paragraph_format.space_after = Pt(4)
+            for run in cert_para.runs:
+                run.font.size = Pt(11)
                 run.font.name = 'Calibri'
     
     # Save to bytes
@@ -684,183 +776,263 @@ def _render_template_2(answers: dict) -> bytes:
 def _render_template_3(answers: dict) -> bytes:
     """
     Template 3: Executive Bold Layout
-    - Strong visual hierarchy with bold section headers
-    - Larger fonts and more spacing
-    - Professional executive appearance
+    - Strong visual hierarchy with bold black section headers
+    - Larger fonts and generous spacing for executive presence
+    - Authoritative, commanding appearance
+    - Arial Black/Arial for bold impact
     """
     doc = Document()
     
-    # Set margins
+    # Set generous margins for executive presence
     sections = doc.sections
     for section in sections:
-        section.top_margin = Inches(0.6)
-        section.bottom_margin = Inches(0.6)
-        section.left_margin = Inches(0.8)
-        section.right_margin = Inches(0.8)
+        section.top_margin = Inches(0.75)
+        section.bottom_margin = Inches(0.75)
+        section.left_margin = Inches(0.75)
+        section.right_margin = Inches(0.75)
     
     # Get data
     basics = answers.get('basics', {})
     summary = answers.get('summary', '')
-    skills = _clean_skills(answers.get('skills', []))
+    skills = _clean_skills(answers.get('skills', []))[:6]  # Limit to 6 skills
     experiences = answers.get('experiences', [])
     education = answers.get('education', [])
+    profiles = answers.get('profiles', [])
+    certifications = answers.get('certifications', [])
+    projects = answers.get('projects', [])
     
-    # Header (name bold and large)
+    # ==================== HEADER ====================
+    # Name (bold, very large, ALL CAPS)
     name = basics.get('name', 'Your Name')
     name_para = doc.add_paragraph()
-    name_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    name_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
     name_run = name_para.add_run(name.upper())
     name_run.bold = True
-    name_run.font.size = Pt(26)
+    name_run.font.size = Pt(28)
     name_run.font.name = 'Arial'
+    name_para.paragraph_format.space_after = Pt(4)
     
-    # Title with line below
+    # Title (larger, bold)
     if basics.get('title'):
         title_para = doc.add_paragraph()
-        title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
         title_run = title_para.add_run(basics['title'].upper())
-        title_run.font.size = Pt(13)
+        title_run.bold = True
+        title_run.font.size = Pt(14)
         title_run.font.name = 'Arial'
-        title_run.font.color.rgb = RGBColor(70, 70, 70)
-        
-        # Add horizontal line
-        line_para = doc.add_paragraph()
-        line_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        line_run = line_para.add_run('─' * 60)
-        line_run.font.color.rgb = RGBColor(180, 180, 180)
+        title_run.font.color.rgb = RGBColor(60, 60, 60)
+        title_para.paragraph_format.space_after = Pt(4)
     
-    # Contact info
-    contact_para = doc.add_paragraph()
-    contact_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Contact info (no icons, pipe separated)
     contact_parts = []
-    if basics.get('email'):
-        contact_parts.append(basics['email'])
-    if basics.get('phone'):
-        contact_parts.append(basics['phone'])
     if basics.get('location'):
         contact_parts.append(basics['location'])
+    if basics.get('phone'):
+        contact_parts.append(basics['phone'])
+    if basics.get('email'):
+        contact_parts.append(basics['email'])
     
-    contact_run = contact_para.add_run('  •  '.join(contact_parts))
-    contact_run.font.size = Pt(10)
-    contact_run.font.name = 'Arial'
+    if contact_parts:
+        contact_para = doc.add_paragraph()
+        contact_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        contact_run = contact_para.add_run(' | '.join(contact_parts))
+        contact_run.font.size = Pt(11)
+        contact_run.font.name = 'Arial'
+        contact_run.font.color.rgb = RGBColor(80, 80, 80)
+        contact_para.paragraph_format.space_after = Pt(18)
     
-    doc.add_paragraph()  # Spacer
+    # Thick horizontal line separator
+    _add_horizontal_line(doc)
+    doc.add_paragraph().paragraph_format.space_after = Pt(14)
     
-    # Summary section
+    # ==================== PROFILES ====================
+    if profiles:
+        profiles_heading = doc.add_paragraph()
+        profiles_heading_run = profiles_heading.add_run('PROFESSIONAL PROFILES')
+        profiles_heading_run.bold = True
+        profiles_heading_run.font.size = Pt(14)
+        profiles_heading_run.font.name = 'Arial'
+        profiles_heading.paragraph_format.space_after = Pt(8)
+        
+        profiles_para = doc.add_paragraph()
+        for idx, profile in enumerate(profiles):
+            platform = profile.get('platform', 'Profile')
+            url = profile.get('url', '')
+            if platform and url:
+                if idx > 0:
+                    profiles_para.add_run('  |  ')
+                _add_hyperlink(profiles_para, url, platform)
+        profiles_para.paragraph_format.space_after = Pt(16)
+    
+    # ==================== SUMMARY ====================
     if summary:
         summary_heading = doc.add_paragraph()
         summary_heading_run = summary_heading.add_run('EXECUTIVE SUMMARY')
         summary_heading_run.bold = True
         summary_heading_run.font.size = Pt(14)
         summary_heading_run.font.name = 'Arial'
-        summary_heading.paragraph_format.space_before = Pt(6)
-        summary_heading.paragraph_format.space_after = Pt(6)
-        
-        # Add underline
-        underline_para = doc.add_paragraph()
-        underline_run = underline_para.add_run('_' * 80)
-        underline_run.font.size = Pt(8)
-        underline_run.font.color.rgb = RGBColor(0, 0, 0)
-        underline_para.paragraph_format.space_after = Pt(8)
+        summary_heading.paragraph_format.space_after = Pt(8)
         
         summary_para = doc.add_paragraph(summary)
-        summary_para.paragraph_format.space_after = Pt(14)
+        summary_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        summary_para.paragraph_format.space_after = Pt(16)
         for run in summary_para.runs:
             run.font.size = Pt(11)
             run.font.name = 'Arial'
     
-    # Experience section
+    # ==================== CORE COMPETENCIES ====================
+    if skills:
+        skills_heading = doc.add_paragraph()
+        skills_heading_run = skills_heading.add_run('CORE COMPETENCIES')
+        skills_heading_run.bold = True
+        skills_heading_run.font.size = Pt(14)
+        skills_heading_run.font.name = 'Arial'
+        skills_heading.paragraph_format.space_after = Pt(8)
+        
+        skills_text = '  •  '.join(skills)
+        skills_para = doc.add_paragraph(skills_text)
+        skills_para.paragraph_format.space_after = Pt(16)
+        for run in skills_para.runs:
+            run.font.size = Pt(11)
+            run.font.name = 'Arial'
+            run.bold = True
+    
+    # ==================== PROFESSIONAL EXPERIENCE ====================
     if experiences:
         exp_heading = doc.add_paragraph()
         exp_heading_run = exp_heading.add_run('PROFESSIONAL EXPERIENCE')
         exp_heading_run.bold = True
         exp_heading_run.font.size = Pt(14)
         exp_heading_run.font.name = 'Arial'
-        exp_heading.paragraph_format.space_before = Pt(6)
-        exp_heading.paragraph_format.space_after = Pt(6)
+        exp_heading.paragraph_format.space_after = Pt(8)
         
-        # Add underline
-        underline_para = doc.add_paragraph()
-        underline_run = underline_para.add_run('_' * 80)
-        underline_run.font.size = Pt(8)
-        underline_para.paragraph_format.space_after = Pt(8)
-        
-        for exp in experiences:
-            # Company (bold and large)
+        for idx, exp in enumerate(experiences):
+            # Company (bold, ALL CAPS, larger)
             comp_para = doc.add_paragraph()
             comp_run = comp_para.add_run(exp.get('company', 'Company').upper())
             comp_run.bold = True
             comp_run.font.size = Pt(12)
             comp_run.font.name = 'Arial'
-            comp_para.paragraph_format.space_before = Pt(8)
+            comp_para.paragraph_format.space_before = Pt(8) if idx > 0 else Pt(0)
+            comp_para.paragraph_format.space_after = Pt(3)
             
-            # Title and dates on same line
+            # Title and dates
             title_para = doc.add_paragraph()
-            title_run = title_para.add_run(exp.get('title', 'Position'))
+            title_run = title_para.add_run(exp.get('title', exp.get('role', 'Position')))
+            title_run.bold = True
             title_run.font.size = Pt(11)
             title_run.font.name = 'Arial'
             
             dates = f"{exp.get('start', '')} - {exp.get('end', '')}"
-            if dates.strip() != '-':
+            if dates.strip() != ' - ':
                 title_para.add_run(f"  |  {dates}")
+            title_para.paragraph_format.space_after = Pt(2)
+            
+            # Location
+            location = exp.get('city', exp.get('location', ''))
+            if location:
+                loc_para = doc.add_paragraph(location)
+                loc_para.paragraph_format.space_after = Pt(5)
+                for run in loc_para.runs:
+                    run.font.size = Pt(10)
+                    run.font.name = 'Arial'
+                    run.italic = True
+                    run.font.color.rgb = RGBColor(80, 80, 80)
             
             # Bullets
             for bullet in exp.get('bullets', []):
-                bullet_para = doc.add_paragraph(f"• {bullet}")
-                bullet_para.paragraph_format.left_indent = Inches(0.3)
+                bullet_para = doc.add_paragraph()
+                bullet_para.paragraph_format.left_indent = Inches(0.25)
+                bullet_para.paragraph_format.first_line_indent = Inches(-0.2)
                 bullet_para.paragraph_format.space_after = Pt(4)
-                for run in bullet_para.runs:
-                    run.font.size = Pt(10)
-                    run.font.name = 'Arial'
+                bullet_run = bullet_para.add_run(f"▪ {bullet}")
+                bullet_run.font.size = Pt(11)
+                bullet_run.font.name = 'Arial'
+        
+        doc.add_paragraph().paragraph_format.space_after = Pt(8)
     
-    # Skills section
-    if skills:
-        doc.add_paragraph()  # Spacer
-        
-        skills_heading = doc.add_paragraph()
-        skills_heading_run = skills_heading.add_run('CORE COMPETENCIES')
-        skills_heading_run.bold = True
-        skills_heading_run.font.size = Pt(14)
-        skills_heading_run.font.name = 'Arial'
-        skills_heading.paragraph_format.space_before = Pt(6)
-        skills_heading.paragraph_format.space_after = Pt(6)
-        
-        # Add underline
-        underline_para = doc.add_paragraph()
-        underline_run = underline_para.add_run('_' * 80)
-        underline_run.font.size = Pt(8)
-        underline_para.paragraph_format.space_after = Pt(8)
-        
-        skills_text = '  •  '.join(skills)
-        skills_para = doc.add_paragraph(skills_text)
-        for run in skills_para.runs:
-            run.font.size = Pt(11)
-            run.font.name = 'Arial'
-    
-    # Education section
+    # ==================== EDUCATION ====================
     if education:
-        doc.add_paragraph()  # Spacer
-        
         edu_heading = doc.add_paragraph()
         edu_heading_run = edu_heading.add_run('EDUCATION')
         edu_heading_run.bold = True
         edu_heading_run.font.size = Pt(14)
         edu_heading_run.font.name = 'Arial'
-        edu_heading.paragraph_format.space_before = Pt(6)
-        edu_heading.paragraph_format.space_after = Pt(6)
-        
-        # Add underline
-        underline_para = doc.add_paragraph()
-        underline_run = underline_para.add_run('_' * 80)
-        underline_run.font.size = Pt(8)
-        underline_para.paragraph_format.space_after = Pt(8)
+        edu_heading.paragraph_format.space_after = Pt(8)
         
         for edu in education:
-            details = edu.get('details', '')
-            edu_para = doc.add_paragraph(f"• {details}")
-            for run in edu_para.runs:
+            institution = edu.get('institution', 'Institution')
+            degree = edu.get('degree', '')
+            years = edu.get('years', '')
+            
+            # Institution and year
+            edu_para = doc.add_paragraph()
+            inst_run = edu_para.add_run(f"{institution}")
+            inst_run.bold = True
+            inst_run.font.size = Pt(11)
+            inst_run.font.name = 'Arial'
+            
+            if years:
+                edu_para.add_run(f"  |  {years}")
+            edu_para.paragraph_format.space_after = Pt(3)
+            
+            # Degree
+            if degree:
+                degree_para = doc.add_paragraph(degree)
+                degree_para.paragraph_format.space_after = Pt(8)
+                for run in degree_para.runs:
+                    run.font.size = Pt(11)
+                    run.font.name = 'Arial'
+    
+    # ==================== CERTIFICATIONS ====================
+    if certifications:
+        cert_heading = doc.add_paragraph()
+        cert_heading_run = cert_heading.add_run('CERTIFICATIONS & CREDENTIALS')
+        cert_heading_run.bold = True
+        cert_heading_run.font.size = Pt(14)
+        cert_heading_run.font.name = 'Arial'
+        cert_heading.paragraph_format.space_after = Pt(8)
+        
+        for cert in certifications:
+            cert_name = cert.get('name', '')
+            cert_body = cert.get('issuing_body', '')
+            cert_year = cert.get('year', '')
+            
+            cert_text = f"{cert_name}"
+            if cert_body:
+                cert_text += f", {cert_body}"
+            if cert_year:
+                cert_text += f", {cert_year}"
+            
+            cert_para = doc.add_paragraph(f"▪ {cert_text}")
+            cert_para.paragraph_format.left_indent = Inches(0.25)
+            cert_para.paragraph_format.space_after = Pt(5)
+            for run in cert_para.runs:
                 run.font.size = Pt(11)
                 run.font.name = 'Arial'
+    
+    # ==================== PROJECTS ====================
+    if projects:
+        proj_heading = doc.add_paragraph()
+        proj_heading_run = proj_heading.add_run('KEY PROJECTS')
+        proj_heading_run.bold = True
+        proj_heading_run.font.size = Pt(14)
+        proj_heading_run.font.name = 'Arial'
+        proj_heading.paragraph_format.space_after = Pt(8)
+        
+        for proj in projects:
+            proj_name = proj.get('name', '')
+            proj_details = proj.get('details', '')
+            
+            if proj_name and proj_details:
+                proj_para = doc.add_paragraph()
+                proj_name_run = proj_para.add_run(f"{proj_name}: ")
+                proj_name_run.bold = True
+                proj_para.add_run(proj_details)
+                proj_para.paragraph_format.space_after = Pt(6)
+                for run in proj_para.runs:
+                    run.font.size = Pt(11)
+                    run.font.name = 'Arial'
     
     # Save to bytes
     buffer = BytesIO()
