@@ -267,15 +267,20 @@ def convert_docx_to_pdf(docx_path) -> tuple[bytes | None, str]:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir_path = Path(temp_dir)
             
-            # Run LibreOffice conversion
+            # Run LibreOffice conversion with PDF export filter
             # --headless: run without GUI
-            # --convert-to pdf: output format
+            # --convert-to: output format with filter options
             # --outdir: output directory
+            # Filter options:
+            # - SelectPdfVersion=1 (PDF 1.4)
+            # - UseTaggedPDF=false (disable tagging for exact layout)
+            # - ExportBookmarks=false
+            # - ExportNotes=false
             cmd = [
                 "libreoffice",
                 "--headless",
                 "--convert-to",
-                "pdf",
+                "pdf:writer_pdf_Export",
                 "--outdir",
                 str(temp_dir_path),
                 str(docx_path)

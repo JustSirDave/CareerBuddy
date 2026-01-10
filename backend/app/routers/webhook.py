@@ -257,7 +257,9 @@ Reply /reset to create another document."""
 
 async def send_pdf_to_user(chat_id: int | str, user_id: str, db: Session):
     """
-    Converts the latest .docx document for the user to PDF and sends it.
+    Generate PDF for the user. Premium feature only.
+    - If user uploaded edited DOCX: Convert it using LibreOffice
+    - If no upload: Generate PDF directly from data (bypasses LibreOffice issues)
     
     Args:
         chat_id: Telegram chat ID
@@ -267,6 +269,7 @@ async def send_pdf_to_user(chat_id: int | str, user_id: str, db: Session):
     try:
         from pathlib import Path
         from app.services import storage
+        from app.services import pdf_renderer
         from app.models import User, Job
         
         user = db.query(User).filter(User.telegram_user_id == str(user_id)).first()
@@ -274,43 +277,82 @@ async def send_pdf_to_user(chat_id: int | str, user_id: str, db: Session):
             await reply_text(chat_id, "❌ User not found. Please start with /start.")
             return
 
-        # Find the latest uploaded .docx or generated .docx
-        latest_docx_path = None
+        # Check if user has premium access
+        if user.tier != "pro":
+            await reply_text(chat_id, """🔒 *PDF Export is a Premium Feature*
+
+To convert your documents to PDF, you need premium access.
+
+*Premium Benefits:*
+• PDF export for all document types
+• Priority support
+• Unlimited document generations
+• Advanced templates
+
+Type /upgrade to get premium access now!""")
+            return
+
+        # Find the latest job
+        latest_job = db.query(Job).filter(
+            Job.user_id == user.id, 
+            Job.status == "completed"
+        ).order_by(Job.created_at.desc()).first()
         
-        # Check for uploaded documents first
+        if not latest_job:
+            await reply_text(chat_id, "❌ No document found to convert. Please generate a document first.")
+            return
+
+        # Check for uploaded (edited) documents
+        latest_uploaded_docx = None
         upload_dir = Path("output") / "uploads" / str(user.id)
         if upload_dir.exists():
             docx_files = sorted(upload_dir.glob("*.docx"), key=lambda p: p.stat().st_mtime, reverse=True)
             if docx_files:
-                latest_docx_path = docx_files[0]
-                logger.info(f"[send_pdf] Found latest uploaded docx: {latest_docx_path}")
-        
-        # If no uploaded docx, check for latest generated job docx
-        if not latest_docx_path:
-            latest_job = db.query(Job).filter(
-                Job.user_id == user.id, 
-                Job.status == "completed"
-            ).order_by(Job.created_at.desc()).first()
+                latest_uploaded_docx = docx_files[0]
+                logger.info(f"[send_pdf] Found latest uploaded docx: {latest_uploaded_docx}")
+
+        await send_typing_action(chat_id)
+        await reply_text(chat_id, "⚙️ *Generating PDF...*\n\nThis may take a moment.")
+
+        pdf_bytes = None
+        pdf_filename = None
+
+        # If user uploaded edited DOCX, convert it with LibreOffice
+        if latest_uploaded_docx:
+            logger.info(f"[send_pdf] User uploaded edited DOCX, using LibreOffice conversion")
+            pdf_bytes, pdf_filename = storage.convert_docx_to_pdf(latest_uploaded_docx)
+        else:
+            # No upload - generate PDF directly from data (avoids LibreOffice table issues)
+            logger.info(f"[send_pdf] No edited DOCX, generating PDF directly from data")
+            template = latest_job.answers.get('template', 'template_1')
             
-            if latest_job:
-                # Look for docx files in the job's output directory
+            # Only template_1 has direct PDF generation (others use LibreOffice)
+            if template == 'template_1':
+                try:
+                    pdf_bytes = pdf_renderer.render_pdf_from_data(latest_job.answers, template)
+                    # Generate filename
+                    doc_type = latest_job.type or 'document'
+                    from datetime import datetime
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    pdf_filename = f"{doc_type}_{template}_{timestamp}.pdf"
+                except Exception as e:
+                    logger.error(f"[send_pdf] Direct PDF generation failed: {e}")
+                    # Fallback to LibreOffice conversion
+                    job_output_dir = Path("output") / "jobs" / latest_job.id
+                    if job_output_dir.exists():
+                        docx_files = list(job_output_dir.glob("*.docx"))
+                        if docx_files:
+                            latest_docx_path = max(docx_files, key=lambda p: p.stat().st_mtime)
+                            pdf_bytes, pdf_filename = storage.convert_docx_to_pdf(latest_docx_path)
+            else:
+                # For other templates, use LibreOffice (they don't have table issues)
                 job_output_dir = Path("output") / "jobs" / latest_job.id
                 if job_output_dir.exists():
                     docx_files = list(job_output_dir.glob("*.docx"))
                     if docx_files:
-                        # Get the most recent docx file
                         latest_docx_path = max(docx_files, key=lambda p: p.stat().st_mtime)
-                        logger.info(f"[send_pdf] Found latest generated job docx: {latest_docx_path}")
-
-        if not latest_docx_path:
-            await reply_text(chat_id, "❌ No .docx document found to convert. Please generate a document first or upload an edited one.")
-            return
-
-        await send_typing_action(chat_id)
-        await reply_text(chat_id, "⚙️ *Converting to PDF...*\n\nThis may take a moment.")
-
-        # Convert DOCX to PDF
-        pdf_bytes, pdf_filename = storage.convert_docx_to_pdf(latest_docx_path)
+                        logger.info(f"[send_pdf] Using LibreOffice for {template}")
+                        pdf_bytes, pdf_filename = storage.convert_docx_to_pdf(latest_docx_path)
 
         if not pdf_bytes:
             await reply_text(chat_id, "❌ Sorry, I couldn't convert your document to PDF. This feature requires LibreOffice to be installed on the server. Please try converting it manually or contact support.")

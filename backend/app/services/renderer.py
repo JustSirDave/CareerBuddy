@@ -6,6 +6,7 @@ from typing import Dict, List
 from docx import Document
 from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_ALIGN_VERTICAL
 from loguru import logger
 
 from app.models import Job
@@ -155,7 +156,7 @@ def _render_template_1(answers: dict) -> bytes:
 
     # Add horizontal line after header
     _add_horizontal_line(doc)
-    doc.add_paragraph().space_after = Pt(16)  # Increased spacing before first section
+    doc.add_paragraph().space_after = Pt(10)  # Reduced spacing before first section
 
     # ==================== MAIN CONTENT TABLE ====================
     from docx.oxml.shared import OxmlElement
@@ -200,10 +201,23 @@ def _render_template_1(answers: dict) -> bytes:
         tblBorders.append(border)
     tblPr.append(tblBorders)
     
+    # Set cell margins to zero to prevent extra spacing in PDF
+    tblCellMar = OxmlElement('w:tblCellMar')
+    for margin_name in ['top', 'left', 'bottom', 'right']:
+        margin = OxmlElement(f'w:{margin_name}')
+        margin.set(qn('w:w'), '0')
+        margin.set(qn('w:type'), 'dxa')
+        tblCellMar.append(margin)
+    tblPr.append(tblCellMar)
+    
     # Set column widths (0.5" margins = 7.5" available width)
     for row in table.rows:
         row.cells[0].width = Inches(1.2)  # Labels column
         row.cells[1].width = Inches(6.3)  # Content column (full width)
+        
+        # Set vertical alignment to top for both cells to reduce spacing
+        row.cells[0].vertical_alignment = WD_ALIGN_VERTICAL.TOP
+        row.cells[1].vertical_alignment = WD_ALIGN_VERTICAL.TOP
     
     current_row = 0
 
@@ -213,14 +227,16 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(4)  # Less spacing
+        label_para.paragraph_format.space_before = Pt(0)
+        label_para.paragraph_format.space_after = Pt(0)  # Zero spacing to prevent PDF conversion gaps
         label_run = label_para.add_run('Profiles')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
         label_run.font.name = 'Calibri'
         
         content_para = content_cell.paragraphs[0]
-        content_para.paragraph_format.space_after = Pt(16)  # Uniform spacing
+        content_para.paragraph_format.space_before = Pt(0)
+        content_para.paragraph_format.space_after = Pt(0)  # Zero spacing - LibreOffice treats this as row spacing
         
         # Add clickable hyperlinks for profiles (NO icons)
         for idx, profile in enumerate(profiles):
@@ -244,7 +260,8 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
+        label_para.paragraph_format.space_before = Pt(0)
+        label_para.paragraph_format.space_after = Pt(0)  # Zero spacing to prevent PDF conversion gaps
         label_run = label_para.add_run('Summary')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
@@ -252,7 +269,8 @@ def _render_template_1(answers: dict) -> bytes:
         
         content_para = content_cell.paragraphs[0]
         content_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        content_para.paragraph_format.space_after = Pt(16)  # Uniform spacing
+        content_para.paragraph_format.space_before = Pt(0)
+        content_para.paragraph_format.space_after = Pt(0)  # Zero spacing - LibreOffice treats this as row spacing
         content_run = content_para.add_run(summary)
         content_run.font.size = Pt(12)  # Body size
         content_run.font.name = 'Calibri'
@@ -266,7 +284,8 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
+        label_para.paragraph_format.space_before = Pt(0)
+        label_para.paragraph_format.space_after = Pt(0)  # Zero spacing to prevent PDF conversion gaps
         label_run = label_para.add_run('Experience')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
@@ -277,7 +296,9 @@ def _render_template_1(answers: dict) -> bytes:
         for idx, exp in enumerate(experiences):
             # Company name and dates on same line
             exp_header = content_cell.add_paragraph()
-            exp_header.paragraph_format.space_after = Pt(2)
+            if idx == 0:
+                exp_header.paragraph_format.space_before = Pt(0)  # No space before first item
+            exp_header.paragraph_format.space_after = Pt(0)
             
             company = exp.get('company', 'Company Name')
             company_run = exp_header.add_run(company)
@@ -304,7 +325,7 @@ def _render_template_1(answers: dict) -> bytes:
             
             # Job title and location on same line
             role_para = content_cell.add_paragraph()
-            role_para.paragraph_format.space_after = Pt(4)
+            role_para.paragraph_format.space_after = Pt(0)
             
             role = exp.get('title', exp.get('role', 'Job Title'))
             role_run = role_para.add_run(role)
@@ -326,7 +347,7 @@ def _render_template_1(answers: dict) -> bytes:
             bullets = exp.get('bullets', [])
             for bullet in bullets:
                 bullet_para = content_cell.add_paragraph()
-                bullet_para.paragraph_format.space_after = Pt(2)
+                bullet_para.paragraph_format.space_after = Pt(0)
                 bullet_para.paragraph_format.left_indent = Inches(0.2)
                 bullet_para.paragraph_format.first_line_indent = Inches(-0.15)
                 bullet_run = bullet_para.add_run(f"• {bullet}")
@@ -335,9 +356,9 @@ def _render_template_1(answers: dict) -> bytes:
             
             # Spacing between experiences
             if idx < len(experiences) - 1:
-                content_cell.add_paragraph().space_after = Pt(4)
+                content_cell.add_paragraph().space_after = Pt(0)
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Uniform spacing after section
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(0)  # Zero spacing in table cells
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -347,7 +368,8 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
+        label_para.paragraph_format.space_before = Pt(0)
+        label_para.paragraph_format.space_after = Pt(0)  # Zero spacing to prevent PDF conversion gaps
         label_run = label_para.add_run('Education')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
@@ -358,7 +380,9 @@ def _render_template_1(answers: dict) -> bytes:
         for idx, edu in enumerate(education):
             # Institution (bold) on left, Date (bold) on far right
             edu_header = content_cell.add_paragraph()
-            edu_header.paragraph_format.space_after = Pt(2)
+            if idx == 0:
+                edu_header.paragraph_format.space_before = Pt(0)  # No space before first item
+            edu_header.paragraph_format.space_after = Pt(0)
             
             institution = edu.get('institution', 'Institution Name')
             inst_run = edu_header.add_run(institution)
@@ -379,7 +403,7 @@ def _render_template_1(answers: dict) -> bytes:
             
             # Course on left, Degree type on right
             degree_para = content_cell.add_paragraph()
-            degree_para.paragraph_format.space_after = Pt(8)
+            degree_para.paragraph_format.space_after = Pt(0)
             
             degree = edu.get('degree', '')
             degree_run = degree_para.add_run(degree)
@@ -396,7 +420,7 @@ def _render_template_1(answers: dict) -> bytes:
                 type_run.font.size = Pt(12)
                 type_run.font.name = 'Calibri'
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Uniform spacing after section
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(0)  # Zero spacing in table cells
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -406,7 +430,8 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
+        label_para.paragraph_format.space_before = Pt(0)
+        label_para.paragraph_format.space_after = Pt(0)  # Zero spacing to prevent PDF conversion gaps
         label_run = label_para.add_run('Projects')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
@@ -414,9 +439,11 @@ def _render_template_1(answers: dict) -> bytes:
         
         content_cell._element.remove(content_cell.paragraphs[0]._element)
 
-        for proj in projects:
+        for idx, proj in enumerate(projects):
             proj_para = content_cell.add_paragraph()
-            proj_para.paragraph_format.space_after = Pt(4)
+            if idx == 0:
+                proj_para.paragraph_format.space_before = Pt(0)  # No space before first item
+            proj_para.paragraph_format.space_after = Pt(0)
             proj_para.paragraph_format.left_indent = Inches(0.2)
             proj_para.paragraph_format.first_line_indent = Inches(-0.15)
             proj_details = proj.get('details', '')
@@ -425,7 +452,7 @@ def _render_template_1(answers: dict) -> bytes:
                 proj_run.font.size = Pt(12)
                 proj_run.font.name = 'Calibri'
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Uniform spacing after section
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(0)  # Zero spacing in table cells
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -435,7 +462,8 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
+        label_para.paragraph_format.space_before = Pt(0)
+        label_para.paragraph_format.space_after = Pt(0)  # Zero spacing to prevent PDF conversion gaps
         label_run = label_para.add_run('References')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
@@ -443,8 +471,10 @@ def _render_template_1(answers: dict) -> bytes:
         
         content_cell._element.remove(content_cell.paragraphs[0]._element)
         
-        for ref in references:
+        for idx, ref in enumerate(references):
             name_para = content_cell.add_paragraph()
+            if idx == 0:
+                name_para.paragraph_format.space_before = Pt(0)  # No space before first item
             name_para.paragraph_format.space_after = Pt(0)
             name_run = name_para.add_run(ref.get('name', 'Reference Name'))
             name_run.font.bold = True
@@ -462,12 +492,12 @@ def _render_template_1(answers: dict) -> bytes:
             ref_org = ref.get('organization', '')
             if ref_org:
                 org_para = content_cell.add_paragraph(ref_org)
-                org_para.paragraph_format.space_after = Pt(8)
+                org_para.paragraph_format.space_after = Pt(0)
                 for run in org_para.runs:
                     run.font.size = Pt(12)
                     run.font.name = 'Calibri'
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Uniform spacing after section
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(0)  # Zero spacing in table cells
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -477,7 +507,8 @@ def _render_template_1(answers: dict) -> bytes:
         content_cell = table.rows[current_row].cells[1]
         
         label_para = label_cell.paragraphs[0]
-        label_para.paragraph_format.space_after = Pt(4)  # Tight spacing to match reference
+        label_para.paragraph_format.space_before = Pt(0)
+        label_para.paragraph_format.space_after = Pt(0)  # Zero spacing to prevent PDF conversion gaps
         label_run = label_para.add_run('Skills')
         label_run.font.bold = True
         label_run.font.size = Pt(14)  # Heading size
@@ -494,7 +525,9 @@ def _render_template_1(answers: dict) -> bytes:
         # Create skill lines with 2 columns
         for i in range(max(len(col1), len(col2))):
             skill_line = content_cell.add_paragraph()
-            skill_line.paragraph_format.space_after = Pt(4)
+            if i == 0:
+                skill_line.paragraph_format.space_before = Pt(0)  # No space before first item
+            skill_line.paragraph_format.space_after = Pt(0)
             
             # Set up tab stop for 2 equal columns
             tab_stops = skill_line.paragraph_format.tab_stops
