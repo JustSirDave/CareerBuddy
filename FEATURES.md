@@ -5,14 +5,17 @@
 ## 🎯 Implemented Features (Priority Order)
 
 ### ✅ Priority 1: PDF Conversion (COMPLETED)
-- **LibreOffice Integration**: Installed in Docker container for server-side PDF conversion
+- **ReportLab Integration**: Direct PDF generation for all templates using ReportLab
+- **LibreOffice Fallback**: Available for user-edited documents
 - **Conversion Command**: Users can type `/pdf` or "convert to pdf" to convert documents
+- **Premium Feature**: PDF conversion requires premium tier (₦5,000 one-time)
 - **Workflow**: 
-  1. User generates/uploads `.docx` document
-  2. Types `/pdf` command
-  3. Bot converts to PDF using LibreOffice
-  4. Sends back professional PDF document
-- **Edit Support**: Users can edit `.docx` files before converting to PDF
+  1. User generates `.docx` document
+  2. User can edit the `.docx` (optional)
+  3. Types `/pdf` command
+  4. Bot generates PDF directly from data or converts edited file
+  5. Sends back professional PDF document
+- **All Templates Supported**: Template 1, 2, and 3 all have direct PDF generation
 
 ### ✅ Priority 2: Cover Letter Generation (COMPLETED)
 - **Conversation Flow**: Basics → Role/Company → Highlights → Preview → Generate
@@ -58,14 +61,20 @@
 ### ✅ Priority 5: Payment Integration (COMPLETED)
 - **Paystack API**: Full integration with Nigerian payment gateway
 - **Free Tier**: 2 free documents per user
-- **Paid Generation**: ₦7,500 per document after free tier
+- **Premium Tier**: ₦5,000 one-time payment for lifetime premium access
+- **Pay-Per-Generation**: ₦7,500 per document after free tier (non-premium users)
 - **Payment Flow**:
-  1. User reaches free tier limit
+  1. User reaches free tier limit or wants premium features
   2. Bot generates Paystack payment link
   3. User pays securely via Paystack
   4. Webhook confirms payment
-  5. Bot notifies user and unlocks generation
+  5. Bot automatically upgrades user or unlocks generation
 - **Webhook Handler**: `/webhooks/paystack` endpoint for payment notifications
+- **Premium Benefits**:
+  - Multiple professional templates (3 styles)
+  - Unlimited PDF conversions
+  - Priority AI enhancements
+  - All document types (cover letters)
 - **Database Records**: All payments logged with metadata
 
 ### ✅ Priority 6: Admin Features (COMPLETED)
@@ -144,11 +153,15 @@
 - `/help` - Show help guide
 - `/reset` - Cancel current job
 - `/status` - Check account status
-- `/pdf` - Convert to PDF
-- `/admin` - Admin dashboard (admin only)
-- `/stats` - System statistics (admin only)
-- `/broadcast` - Send announcement (admin only)
-- `/sample` - Generate test document (admin only)
+- `/upgrade` - Upgrade to Premium (₦5,000)
+- `/pdf` - Convert to PDF (Premium only)
+
+### Admin Commands
+- `/admin` - Admin dashboard
+- `/stats` - System statistics
+- `/broadcast` - Send announcement to all users
+- `/sample` - Generate test document
+- `/setpro` - Manually upgrade user to premium
 
 ## 🚀 Deployment Checklist
 
@@ -192,6 +205,21 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 3. **redis** - Redis 7
 4. **worker** - Celery worker (optional, for async tasks)
 
+## 🚀 Recent Improvements
+
+### Direct PDF Generation (January 2026)
+- **All templates now use ReportLab** for direct PDF generation
+- **Eliminated spacing issues** from LibreOffice DOCX-to-PDF conversion
+- **Pixel-perfect output** matching DOCX layouts
+- **Faster generation** by bypassing LibreOffice
+- **LibreOffice fallback** still available for user-edited documents
+
+### Premium Tier System (January 2026)
+- **One-time payment model**: ₦5,000 for lifetime premium access
+- **Automatic upgrades**: Paystack webhook integration
+- **Admin tools**: Manual user upgrade commands
+- **Feature gating**: PDF export and cover letters premium-only
+
 ## 📈 Future Enhancements (Pending)
 
 ### ⏳ Priority 8: Error Handling Enhancement
@@ -216,8 +244,9 @@ curl -X POST "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 ### Known Limitations
 - Maximum 5 documents per role
 - Free tier limited to 2 documents
-- Template selection only for premium users
-- Cover letters require paid tier
+- Template selection available for all users
+- Cover letters and PDF export require premium tier
+- User-edited documents use LibreOffice conversion (may have spacing issues)
 
 ### Support
 - Telegram: @YourSupportHandle

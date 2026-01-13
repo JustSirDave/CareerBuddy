@@ -82,6 +82,9 @@ _Need help? Use /help command_"""
                 {"text": "🆓 Start with Free Plan", "callback_data": "plan_free"}
             ],
             [
+                {"text": "⭐ Start with Premium Plan", "callback_data": "plan_premium"}
+            ],
+            [
                 {"text": "💡 Learn More", "callback_data": "learn_more"}
             ]
         ]
@@ -133,7 +136,7 @@ Choose what you'd like to create:"""
                 {"text": "✨ Revamp Existing", "callback_data": "doc_revamp"}
             ],
             [
-                {"text": "📝 Cover Letter (Soon)", "callback_data": "doc_cover"}
+                {"text": "📝 Cover Letter", "callback_data": "doc_cover"}
             ],
             [
                 {"text": "❌ Cancel", "callback_data": "cancel"}

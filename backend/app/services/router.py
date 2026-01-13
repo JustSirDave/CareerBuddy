@@ -23,7 +23,9 @@ GREETINGS = {"hi", "hello", "hey", "start", "menu", "/start"}
 RESETS = {"reset", "/reset", "restart"}
 HELP_COMMANDS = {"/help", "help"}
 STATUS_COMMANDS = {"/status", "status"}
-ADMIN_COMMANDS = {"/admin", "/stats", "/broadcast", "/sample"}
+UPGRADE_COMMANDS = {"/upgrade", "upgrade"}
+PAYMENT_BYPASS_PHRASES = {"payment made", "paid", "payment done", "payment complete"}
+ADMIN_COMMANDS = {"/admin", "/stats", "/broadcast", "/sample", "/makeadmin", "/setpro"}
 PDF_COMMANDS = {"/pdf", "pdf", "convert to pdf", "convert pdf"}
 FORCE_LOWER = lambda s: (s or "").strip().lower()
 
@@ -67,7 +69,7 @@ I help you create professional resumes, CVs, and cover letters tailored to your 
 • *Resume* - 1-2 page professional resume
 • *CV* - Detailed curriculum vitae
 • *Revamp* - Improve your existing resume/CV
-• *Cover Letter* - Coming soon!
+• *Cover Letter* - Premium feature
 
 *🎯 How It Works:*
 1. Choose your document type
@@ -78,12 +80,21 @@ I help you create professional resumes, CVs, and cover letters tailored to your 
 *💡 Commands:*
 /start - Start creating a document
 /status - Check your plan & remaining documents
+/upgrade - Upgrade to Premium
+/pdf - Convert document to PDF (Premium)
 /reset - Cancel and start over
 /help - Show this help message
 
 *💳 Pricing:*
 • *Free Plan*: 2 free documents
 • *Pay-Per-Generation*: ₦7,500 per document
+• *Premium Plan*: ₦7,500 (one-time, all features)
+
+*⭐ Premium Features:*
+• Multiple professional templates
+• Unlimited PDF conversions
+• Priority AI enhancements
+• All document types
 
 *🆘 Need Support?*
 Contact: @your_support_username
@@ -210,22 +221,31 @@ def _format_cover_preview(answers: dict) -> str:
     basics = answers.get("basics", {})
     role = answers.get("cover_role") or answers.get("target_role", "")
     company = answers.get("cover_company", "")
-    highlights = answers.get("cover_highlights", [])
 
     lines = ["📋 *Cover Letter Preview*\n"]
+    lines.append(f"*Contact Info:*")
     lines.append(f"Name: {basics.get('name', 'N/A')}")
     lines.append(f"Email: {basics.get('email', 'N/A')}")
     lines.append(f"Phone: {basics.get('phone', 'N/A')}")
     lines.append(f"Location: {basics.get('location', 'N/A')}")
     lines.append("")
+    lines.append(f"*Target Position:*")
     lines.append(f"Role: {role or 'N/A'}")
     lines.append(f"Company: {company or 'N/A'}")
     lines.append("")
-    if highlights:
-        lines.append("*Highlights:*")
-        for h in highlights:
-            lines.append(f"- {h}")
-        lines.append("")
+    lines.append(f"*Experience:*")
+    lines.append(f"{answers.get('years_experience', 'N/A')} in {answers.get('industries', 'N/A')}")
+    lines.append(f"Current: {answers.get('current_title', 'N/A')} at {answers.get('current_employer', 'N/A')}")
+    lines.append("")
+    lines.append(f"*Key Achievement:*")
+    lines.append(f"{answers.get('achievement_1', 'N/A')}")
+    if answers.get('achievement_2'):
+        lines.append(f"{answers.get('achievement_2')}")
+    lines.append("")
+    lines.append(f"*Key Skills:*")
+    skills = answers.get('cover_key_skills', [])
+    lines.append(", ".join(skills) if skills else "N/A")
+    lines.append("")
 
     return "\n".join(lines)
 
@@ -909,8 +929,10 @@ Reply *yes* to generate your improved document, or */reset* to start over."""
 
 async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free") -> str:
     """
-    Simple cover letter flow.
-    Steps: basics -> role_company -> highlights -> preview -> finalize
+    Professional cover letter flow matching HR template.
+    Steps: basics -> role_company -> experience_overview -> interest_reason -> 
+           current_role -> achievement_1 -> achievement_2 -> key_skills -> 
+           company_goal -> preview -> finalize
     """
     answers = job.answers or {"_step": "basics"}
     step = FORCE_LOWER(answers.get("_step") or "basics")
@@ -925,40 +947,106 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
         answers["basics"] = resume_flow.parse_basics(t)
         _advance(db, job, answers, "role_company")
         return ("Great! Now tell me the role and company you're applying to.\n"
-                "Format: Role, Company\n\nExample: Product Manager, Figma")
+                "Format: Position Title, Company Name\n\n"
+                "Example: Senior HR Manager, Google")
 
     # ROLE + COMPANY
     if step == "role_company":
         parts = [p.strip() for p in t.split(",")]
         if len(parts) < 2:
-            return "Please send: Role, Company\n\nExample: Product Manager, Figma"
+            return "Please send: Position Title, Company Name\n\nExample: Senior HR Manager, Google"
 
         answers["cover_role"] = parts[0]
         answers["cover_company"] = parts[1]
         answers["target_role"] = parts[0]
 
-        _advance(db, job, answers, "highlights")
-        return ("Share 2–3 bullet highlights to include (one per message).\n"
-                "Example: Led redesign that improved activation by 22%\n"
-                "Type *done* when finished.")
+        _advance(db, job, answers, "experience_overview")
+        return ("How many years of experience do you have in this field, and which industries?\n\n"
+                "Format: [Years], [Industry/Industries]\n\n"
+                "Example: 15 years, HR and Talent Management")
 
-    # HIGHLIGHTS
-    if step == "highlights":
-        lt = t.lower()
-        highlights = list(answers.get("cover_highlights", []))
+    # EXPERIENCE OVERVIEW
+    if step == "experience_overview":
+        parts = [p.strip() for p in t.split(",", 1)]
+        if len(parts) < 2:
+            return "Please send: Years of experience, Industry\n\nExample: 15 years, HR and Talent Management"
+        
+        answers["years_experience"] = parts[0]
+        answers["industries"] = parts[1]
+        
+        _advance(db, job, answers, "interest_reason")
+        return ("Why are you interested in this specific role or company?\n\n"
+                "Example: I'm excited about your company's commitment to employee development and innovative HR practices")
 
-        if lt in {"done", "skip"}:
-            _advance(db, job, answers, "preview")
-            preview_text = _format_cover_preview(answers)
-            return f"{preview_text}\n\nLooks good? Reply *yes* to generate your cover letter, or */reset* to start over."
+    # INTEREST REASON
+    if step == "interest_reason":
+        if not t:
+            return "Please share why you're interested in this role or company."
+        
+        answers["interest_reason"] = t
+        _advance(db, job, answers, "current_role")
+        return ("What is your current (or most recent) job title and employer?\n\n"
+                "Format: Job Title, Employer\n\n"
+                "Example: HR Director, Microsoft")
 
-        if t:
-            highlights.append(t)
-            answers["cover_highlights"] = highlights
-            job.answers = answers
-            flag_modified(job, "answers")
-            db.commit()
-            return f"Added. ({len(highlights)} so far) Send another or type *done*."
+    # CURRENT ROLE
+    if step == "current_role":
+        parts = [p.strip() for p in t.split(",", 1)]
+        if len(parts) < 2:
+            return "Please send: Job Title, Employer\n\nExample: HR Director, Microsoft"
+        
+        answers["current_title"] = parts[0]
+        answers["current_employer"] = parts[1]
+        
+        _advance(db, job, answers, "achievement_1")
+        return ("Describe a key achievement or responsibility with quantified results.\n\n"
+                "Include:\n"
+                "• What you did\n"
+                "• The measurable outcome\n\n"
+                "Example: Redesigned the recruitment process to shorten time to hire by 35% while improving first-year retention by 20%")
+
+    # ACHIEVEMENT 1
+    if step == "achievement_1":
+        if not t:
+            return "Please share a key achievement with quantified results."
+        
+        answers["achievement_1"] = t
+        _advance(db, job, answers, "achievement_2")
+        return ("Share another key achievement (optional).\n\n"
+                "Example: Partnered with leadership on workforce planning during company expansion, delivering 40% cost savings\n\n"
+                "Or type *skip* to continue")
+
+    # ACHIEVEMENT 2
+    if step == "achievement_2":
+        if t.lower() not in {"skip", "done"}:
+            answers["achievement_2"] = t
+        
+        _advance(db, job, answers, "key_skills")
+        return ("List 3-5 key skills most relevant to this role (separated by commas).\n\n"
+                "Example: HRIS implementation, performance management, compensation benchmarking, employee relations, DEI initiatives")
+
+    # KEY SKILLS
+    if step == "key_skills":
+        if not t:
+            return "Please list 3-5 key skills separated by commas."
+        
+        skills_list = [s.strip() for s in t.split(",")]
+        answers["cover_key_skills"] = skills_list
+        
+        _advance(db, job, answers, "company_goal")
+        return (f"What specific goal or objective at {answers.get('cover_company', 'the company')} do you want to support?\n\n"
+                "Example: Building a more diverse and inclusive workplace culture")
+
+    # COMPANY GOAL
+    if step == "company_goal":
+        if not t:
+            return "Please share what company goal you want to support."
+        
+        answers["company_goal"] = t
+        
+        _advance(db, job, answers, "preview")
+        preview_text = _format_cover_preview(answers)
+        return f"{preview_text}\n\nLooks good? Reply *yes* to generate your cover letter, or */reset* to start over."
 
     # PREVIEW
     if step == "preview":
@@ -1123,6 +1211,100 @@ async def broadcast_message(db: Session, message: str, sender_id: str) -> str:
            f"• Total: {len(all_users)}")
 
 
+async def handle_upgrade_command(db: Session, user: User) -> str:
+    """Handle /upgrade command - shows upgrade info with test bypass."""
+    from app.services import payments
+    
+    # Check if already premium
+    if user.tier == "pro":
+        return """✅ *You're Already Premium!*
+
+You have full access to all premium features:
+• 🎨 Multiple professional templates
+• 📄 Unlimited PDF conversions
+• 🚀 Priority AI enhancements
+• 💼 All document types
+
+Type /status to see your current plan."""
+    
+    # Premium tier pricing
+    PREMIUM_PRICE = 7500  # ₦7,500 for lifetime premium access
+    
+    # For testing - no real payment gateway
+    return f"""⭐ *Upgrade to Premium*
+
+Unlock all premium features:
+• 🎨 *3 Professional Templates* - Choose from Classic, Modern, or Executive styles
+• 📄 *Unlimited PDF Conversions* - Convert and download as many times as you need
+• 🚀 *Priority AI Enhancements* - Better content generation
+• 💼 *All Document Types* - Resume, CV, Cover Letters, Revamps
+
+*Price:* ₦{PREMIUM_PRICE:,} (one-time payment)
+
+*🧪 TEST MODE - To upgrade, simply type:* `payment made`
+
+_Note: Real payment gateway will be integrated in production_"""
+
+
+async def admin_set_user_pro(db: Session, telegram_user_id: str, admin_id: str) -> str:
+    """Admin command to manually upgrade a user to pro tier."""
+    from app.services import payments
+    
+    # Find the user
+    user = db.query(User).filter(User.telegram_user_id == telegram_user_id).first()
+    
+    if not user:
+        return f"❌ *User Not Found*\n\nNo user found with Telegram ID: `{telegram_user_id}`"
+    
+    # Check if already pro
+    if user.tier == "pro":
+        return f"""ℹ️ *Already Premium*
+
+User @{user.telegram_username or telegram_user_id} is already on the pro tier.
+
+*Current Status:*
+• Tier: Pro
+• Total generations: {payments.get_total_generations(user)}"""
+    
+    # Upgrade user
+    user.tier = "pro"
+    
+    # Record a waived payment for tracking
+    payments.record_waived_payment(db, user.id, "admin_upgrade", reference=f"admin-{admin_id}-{telegram_user_id}")
+    
+    db.commit()
+    logger.info(f"[admin] User {user.id} upgraded to pro by admin {admin_id}")
+    
+    # Notify the user
+    from app.services import telegram
+    try:
+        await telegram.reply_text(
+            telegram_user_id,
+            """🎉 *Congratulations!*
+
+Your account has been upgraded to Premium!
+
+You now have access to:
+• 🎨 Multiple professional templates
+• 📄 Unlimited PDF conversions
+• 🚀 Priority AI enhancements
+• 💼 All document types
+
+Type /status to see your premium features!"""
+        )
+    except Exception as e:
+        logger.error(f"[admin] Failed to notify user {telegram_user_id} of upgrade: {e}")
+    
+    return f"""✅ *User Upgraded Successfully*
+
+@{user.telegram_username or telegram_user_id} has been upgraded to Pro tier.
+
+*Updated Status:*
+• Tier: Pro
+• Total generations: {payments.get_total_generations(user)}
+• User notified: ✓"""
+
+
 async def generate_sample_document(db: Session, user_id: int, template_choice: str = "template_1", doc_type: str = "resume") -> tuple[str, str]:
     """
     Generate a sample document with pre-filled data for admin testing.
@@ -1217,6 +1399,10 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         db.commit()
         db.refresh(user)
         logger.info(f"[handle_inbound] Created new user telegram_user_id={telegram_user_id} tier=free")
+    else:
+        # Refresh user from database to ensure we have the latest tier status
+        db.refresh(user)
+        logger.info(f"[handle_inbound] User {telegram_user_id} tier={user.tier}")
 
     incoming = (text or "").strip()
     t_lower = incoming.lower()
@@ -1246,6 +1432,16 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
                 return ("📢 *Broadcast Command*\n\n"
                        "*Usage:* /broadcast <message>\n\n"
                        "*Example:* /broadcast Hello everyone! New features coming soon!")
+        elif t_lower.startswith("/setpro ") or t_lower.startswith("/makeadmin "):
+            # Extract telegram user ID after the command
+            target_user_id = incoming.split(maxsplit=1)[1].strip() if len(incoming.split()) > 1 else ""
+            if target_user_id:
+                return await admin_set_user_pro(db, target_user_id, telegram_user_id)
+            else:
+                return ("👤 *Upgrade User to Premium*\n\n"
+                       "*Usage:* /setpro <telegram_user_id>\n\n"
+                       "*Example:* /setpro 123456789\n\n"
+                       "_This will upgrade the user to Pro tier and notify them._")
         elif t_lower.startswith("/sample"):
             # Generate sample document for testing
             # Usage: /sample <type> [template]
@@ -1337,7 +1533,57 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         status_msg += "\nReady to create? Type /start!"
         return status_msg
 
-    # 1.8) PDF conversion command
+    # 1.8) Upgrade command
+    if t_lower in UPGRADE_COMMANDS:
+        logger.info(f"[handle_inbound] Processing /upgrade command for user {telegram_user_id}")
+        return await handle_upgrade_command(db, user)
+    
+    # 1.8.5) Payment bypass for testing (no real payment gateway)
+    if t_lower in PAYMENT_BYPASS_PHRASES:
+        logger.info(f"[handle_inbound] Payment bypass triggered for user {telegram_user_id}")
+        
+        # Check if already premium
+        if user.tier == "pro":
+            return """✅ You're already a Premium user!
+            
+Type /status to see your premium features."""
+        
+        # Upgrade user to premium
+        user.tier = "pro"
+        logger.info(f"[handle_inbound] Setting user {user.id} tier to 'pro'")
+        
+        # Commit the tier change FIRST to ensure it's persisted
+        db.commit()
+        db.refresh(user)  # Refresh to ensure we have the committed state
+        logger.info(f"[handle_inbound] User {user.id} tier change committed. Current tier: {user.tier}")
+        
+        # Record a waived payment for tracking (in separate transaction)
+        try:
+            from app.services import payments
+            payments.record_waived_payment(db, user.id, "test_bypass", reference=f"test-{telegram_user_id}")
+        except Exception as e:
+            logger.error(f"[handle_inbound] Failed to record waived payment (tier already upgraded): {e}")
+        
+        return """🎉 *Payment Confirmed - You're Now Premium!*
+
+✅ Account upgraded successfully
+
+You now have access to:
+• 🎨 Multiple professional templates
+• 📄 Unlimited PDF conversions
+• 🚀 Priority AI enhancements
+• 💼 All document types (Resume, CV, Cover Letter, Revamp)
+
+*🚀 Ready to create?*
+Type /start to see the menu, then choose:
+• *Resume* - Professional 1-2 page resume
+• *CV* - Detailed curriculum vitae
+• *Cover Letter* - Tailored application letter
+• *Revamp* - Improve an existing document
+
+Or simply type what you want to create!"""
+
+    # 1.9) PDF conversion command
     if t_lower in PDF_COMMANDS or "convert" in t_lower and "pdf" in t_lower:
         logger.info(f"[handle_inbound] Processing /pdf command for user {telegram_user_id}")
         return await convert_to_pdf(db, user, telegram_user_id)
@@ -1377,9 +1623,11 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
 
     # 3) Get/create active job (based on intent if present)
     doc_type = infer_type(incoming)
+    logger.info(f"[handle_inbound] doc_type={doc_type}, user.tier={user.tier}, user.id={user.id}")
 
     # Check if free user is trying to access cover letter
     if doc_type == "cover" and user.tier == "free":
+        logger.warning(f"[handle_inbound] Blocking free user {user.id} from cover letter. Tier: {user.tier}")
         return ("💼 *Cover Letters are a Premium feature*\n\n"
                 "Upgrade to Premium and unlock:\n"
                 "✨ Professional cover letter generation\n"
@@ -1387,6 +1635,9 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
                 "✨ Senior-level summaries\n"
                 "✨ Priority support\n\n"
                 "Ready to upgrade? Type *Premium* to get started!")
+    
+    if doc_type == "cover" and user.tier != "free":
+        logger.info(f"[handle_inbound] Allowing premium user {user.id} (tier={user.tier}) to access cover letter")
 
     job = get_active_job(db, user.id, doc_type)
     _log_state("after get_active_job", job)

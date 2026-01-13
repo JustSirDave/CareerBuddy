@@ -8,14 +8,17 @@ CareerBuddy is an intelligent agent that helps users create ATS-compliant profes
 
 ### Key Features
 
--  **Conversational Interface** - Natural conversation flow via Telegram
--  **AI-Enhanced Content** - Claude AI improves summaries and bullet points
--  **ATS-Compliant** - Documents follow applicant tracking system best practices
--  **Multi-Document Support** - Resume, CV, and cover letter generation
--  **Smart Parsing** - Handles comma-separated input for quick data entry
--  **Auto-Generation** - AI drafts professional summaries if user skips
--  **Multi-Experience Support** - Add multiple work experiences and education
--  **Deduplication** - Prevents double-processing of messages
+-  **Conversational Interface** - Natural conversation flow via Telegram
+-  **AI-Enhanced Content** - Claude AI improves summaries and bullet points
+-  **ATS-Compliant** - Documents follow applicant tracking system best practices
+-  **Multi-Document Support** - Resume, CV, and cover letter generation
+-  **Smart Parsing** - Handles comma-separated input for quick data entry
+-  **Auto-Generation** - AI drafts professional summaries if user skips
+-  **Multi-Experience Support** - Add multiple work experiences and education
+-  **Deduplication** - Prevents double-processing of messages
+-  **Premium Tier** - One-time payment (₦5,000) for unlimited features
+-  **PDF Export** - Direct PDF generation with pixel-perfect layouts
+-  **Multiple Templates** - 3 professional templates (Classic, Modern, Executive)
 
 ## Tech Stack
 
@@ -29,6 +32,8 @@ CareerBuddy is an intelligent agent that helps users create ATS-compliant profes
 
 ### Document Generation
 - **python-docx** - DOCX file generation
+- **ReportLab** - Direct PDF generation (all templates)
+- **LibreOffice** - Fallback DOCX to PDF conversion
 - **Jinja2** - Template engine
 
 ### AI/LLM
@@ -39,6 +44,7 @@ CareerBuddy is an intelligent agent that helps users create ATS-compliant profes
 
 ### External APIs
 - **Telegram Bot API** - Official Telegram bot interface
+- **Paystack API** - Payment processing
 
 ### Infrastructure
 - **Docker & Docker Compose** - Containerization
@@ -77,6 +83,9 @@ OPENAI_API_KEY=your_openai_key_here
 
 # Payments (Paystack - Optional)
 PAYSTACK_SECRET=your_paystack_secret_here
+
+# Admin (Optional)
+ADMIN_TELEGRAM_IDS=123456789,987654321
 
 # Storage (S3 - Optional, files saved locally by default)
 S3_ENDPOINT=
@@ -154,13 +163,13 @@ Bot: Send your details (comma-separated):
      Full Name, Title, Email, Phone, City Country
 
 User: John Doe, Backend Engineer, john@example.com, +1234, NYC USA
-Bot: Share a professional summary or type 'skip'
+Bot: What's your target role?
 
-User: skip
-Bot: List your skills (comma-separated)
+User: Senior Backend Engineer
+Bot: [AI generates skills] Select 5-8 skills by number...
 
-User: Python, FastAPI, PostgreSQL, Docker
-Bot: Send: Role, Company, City, Start, End
+User: 1, 2, 3, 4, 5
+Bot: Share your work experience...
 
 User: Backend Engineer, TechCorp, NYC, Jan 2020, Present
 Bot: Send 2-4 bullets. Type 'done' when finished.
@@ -168,8 +177,31 @@ Bot: Send 2-4 bullets. Type 'done' when finished.
 User: Built API serving 1M+ requests/day
 User: Reduced query time by 60%
 User: done
-Bot:  Your resume is ready! [Document sent]
+Bot:  Your resume is ready! [Document sent]
+
+User: /pdf
+Bot: ⚙️ Generating PDF... [PDF sent]
 ```
+
+### Available Commands
+
+- `/start` - Begin or restart
+- `/help` - Show help guide
+- `/status` - Check your account status
+- `/upgrade` - Upgrade to Premium (₦5,000)
+- `/pdf` - Convert document to PDF (Premium only)
+- `/reset` - Cancel current job and start over
+
+## Premium Features
+
+Upgrade to Premium for ₦5,000 (one-time payment):
+
+-  **Multiple Templates** - Choose from 3 professional styles
+-  **Unlimited PDF Conversions** - Export as PDF anytime
+-  **Priority AI Enhancements** - Better content generation
+-  **All Document Types** - Resumes, CVs, and Cover Letters
+
+Type `/upgrade` in the bot to get started!
 
 ## Architecture
 
@@ -191,7 +223,7 @@ Telegram ↔ FastAPI → AI Enhancement → Document Renderer → Storage
 
 ```bash
 cd backend
-pip install python-docx anthropic boto3 alembic
+pip install python-docx reportlab anthropic boto3 alembic
 
 # Run locally
 uvicorn app.main:app --reload
@@ -199,16 +231,18 @@ uvicorn app.main:app --reload
 
 ## Project Status
 
-**Phase 2-3: Core Features Complete (70%)**
+**Phase 3: Core Features Complete (90%)**
 
--  Infrastructure & Database
--  Telegram Integration
--  Resume/CV Flow
--  Document Rendering
--  AI Enhancement
-- � Cover Letter Flow
-- � Web Interface
-- � Payment Integration
+-  ✅ Infrastructure & Database
+-  ✅ Telegram Integration
+-  ✅ Resume/CV Flow
+-  ✅ Document Rendering (DOCX + PDF)
+-  ✅ AI Enhancement
+-  ✅ Cover Letter Flow
+-  ✅ Payment Integration (Paystack)
+-  ✅ Premium Tier System
+-  ✅ PDF Direct Generation (ReportLab)
+-  🔄 Web Interface (Planned)
 
 ## License
 

@@ -251,6 +251,7 @@ def _render_template_1(answers: dict) -> bytes:
                 hyperlink.font.size = Pt(12)
                 hyperlink.font.name = 'Calibri'
         
+        content_para.paragraph_format.space_after = Pt(16)  # Spacing between sections
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -270,7 +271,7 @@ def _render_template_1(answers: dict) -> bytes:
         content_para = content_cell.paragraphs[0]
         content_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
         content_para.paragraph_format.space_before = Pt(0)
-        content_para.paragraph_format.space_after = Pt(0)  # Zero spacing - LibreOffice treats this as row spacing
+        content_para.paragraph_format.space_after = Pt(16)  # Spacing between sections
         content_run = content_para.add_run(summary)
         content_run.font.size = Pt(12)  # Body size
         content_run.font.name = 'Calibri'
@@ -358,7 +359,7 @@ def _render_template_1(answers: dict) -> bytes:
             if idx < len(experiences) - 1:
                 content_cell.add_paragraph().space_after = Pt(0)
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(0)  # Zero spacing in table cells
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Spacing between sections
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -420,7 +421,7 @@ def _render_template_1(answers: dict) -> bytes:
                 type_run.font.size = Pt(12)
                 type_run.font.name = 'Calibri'
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(0)  # Zero spacing in table cells
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Spacing between sections
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -452,7 +453,7 @@ def _render_template_1(answers: dict) -> bytes:
                 proj_run.font.size = Pt(12)
                 proj_run.font.name = 'Calibri'
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(0)  # Zero spacing in table cells
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Spacing between sections
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -497,7 +498,7 @@ def _render_template_1(answers: dict) -> bytes:
                     run.font.size = Pt(12)
                     run.font.name = 'Calibri'
         
-        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(0)  # Zero spacing in table cells
+        content_cell.paragraphs[-1].paragraph_format.space_after = Pt(16)  # Spacing between sections
         _add_table_row_border(table.rows[current_row])
         current_row += 1
 
@@ -1079,523 +1080,198 @@ def _render_template_3(answers: dict) -> bytes:
 def render_cv(job: Job) -> bytes:
     """
     Generate CV with professional layout.
-    Supports multiple templates based on user selection.
-    CV uses the same templates as Resume for consistency.
+    CV now uses the EXACT SAME layout as Resume for consistency.
+    The only difference is the document type label - layout is identical.
     """
     answers = job.answers or {}
     selected_template = answers.get("template", "template_1")
     
-    # Route to appropriate template renderer (same as resume)
+    # Use the same template renderers as Resume
     if selected_template == "template_2":
         return _render_template_2(answers)
     elif selected_template == "template_3":
         return _render_template_3(answers)
     else:
-        # Default to template 1
-        return _render_cv_template_1(answers)
+        # Use the same Template 1 as Resume (perfected layout)
+        return _render_template_1(answers)
 
 
-def _render_cv_template_1(answers: dict) -> bytes:
-    """
-    Template 1 for CV: Classic Professional Layout
-    Uses table-based layout with:
-    - Centered header (name, title, contact details with icons)
-    - Two-column table structure: labels on left, content on right
-    - Horizontal line separators between sections
-    - Skills in two columns at the bottom
-    """
-    doc = Document()
+# NOTE: Old _render_cv_template_1 function removed - CV now uses same layout as Resume
 
-    # Set document margins
-    sections = doc.sections
-    for section in sections:
-        section.top_margin = Inches(0.5)
-        section.bottom_margin = Inches(0.5)
-        section.left_margin = Inches(0.7)
-        section.right_margin = Inches(0.7)
-
-    # Get data
-    basics = answers.get('basics', {})
-    profiles = answers.get('profiles', [])
-    summary = answers.get('summary', '')
-    skills = _clean_skills(answers.get('skills', []))
-    experiences = answers.get('experiences', [])
-    education = answers.get('education', [])
-    references = answers.get('references', [])
-
-    # ==================== HEADER ====================
-    name = basics.get('name', 'Your Name')
-    title = basics.get('title', 'Professional Title')
-
-    # Name (Large, Bold, Centered)
-    name_para = doc.add_paragraph()
-    name_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    name_run = name_para.add_run(name)
-    name_run.font.size = Pt(20)
-    name_run.font.bold = True
-    name_run.font.name = 'Arial'
-    name_para.space_after = Pt(2)
-
-    # Title (Centered, smaller)
-    title_para = doc.add_paragraph()
-    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_run = title_para.add_run(title)
-    title_run.font.size = Pt(11)
-    title_run.font.name = 'Arial'
-    title_para.space_after = Pt(6)
-
-    # Contact Info - Single line with icons
-    contact_parts = []
-    if basics.get('location'):
-        contact_parts.append(f"📍 {basics['location']}")
-    if basics.get('phone'):
-        contact_parts.append(f"☎ {basics['phone']}")
-    if basics.get('email'):
-        contact_parts.append(f"✉ {basics['email']}")
-
-    if contact_parts:
-        contact_para = doc.add_paragraph()
-        contact_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        contact_run = contact_para.add_run('  '.join(contact_parts))
-        contact_run.font.size = Pt(9)
-        contact_run.font.name = 'Arial'
-        contact_para.space_after = Pt(8)
-
-    # Add horizontal line after header
-    _add_horizontal_line(doc)
-    doc.add_paragraph().space_after = Pt(4)
-
-    # ==================== MAIN CONTENT TABLE ====================
-    # Create table with 2 columns: labels (left) and content (right)
-    from docx.oxml.shared import OxmlElement
-    from docx.oxml.ns import qn
-    
-    # Calculate number of rows needed
-    num_rows = 0
-    if profiles: num_rows += 1
-    if summary: num_rows += 1
-    if experiences: num_rows += 1
-    if education: num_rows += 1
-    if references: num_rows += 1
-    if skills: num_rows += 1
-    
-    if num_rows == 0:
-        # No content, just return empty doc
-        buffer = BytesIO()
-        doc.save(buffer)
-        buffer.seek(0)
-        return buffer.getvalue()
-    
-    table = doc.add_table(rows=num_rows, cols=2)
-    table.style = 'Table Grid'
-    
-    # Remove all table borders (make them invisible)
-    from docx.oxml.shared import OxmlElement
-    from docx.oxml.ns import qn
-    
-    tbl = table._element
-    tblPr = tbl.tblPr
-    if tblPr is None:
-        tblPr = OxmlElement('w:tblPr')
-        tbl.insert(0, tblPr)
-    
-    tblBorders = OxmlElement('w:tblBorders')
-    for border_name in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
-        border = OxmlElement(f'w:{border_name}')
-        border.set(qn('w:val'), 'none')
-        border.set(qn('w:sz'), '0')
-        border.set(qn('w:space'), '0')
-        border.set(qn('w:color'), 'auto')
-        tblBorders.append(border)
-    tblPr.append(tblBorders)
-    
-    # Set column widths: narrow for labels, wide for content
-    for row in table.rows:
-        row.cells[0].width = Inches(1.2)
-        row.cells[1].width = Inches(5.3)
-    
-    current_row = 0
-
-    # ==================== PROFILES ====================
-    if profiles:
-        label_cell = table.rows[current_row].cells[0]
-        content_cell = table.rows[current_row].cells[1]
-        
-        # Label
-        label_para = label_cell.paragraphs[0]
-        label_run = label_para.add_run('Profiles')
-        label_run.font.bold = True
-        label_run.font.size = Pt(11)
-        label_run.font.name = 'Arial'
-        
-        # Content
-        content_para = content_cell.paragraphs[0]
-        profile_texts = []
-        for profile in profiles:
-            platform = profile.get('platform', 'Profile')
-            url = profile.get('url', '')
-            if platform and url:
-                if 'linkedin' in platform.lower():
-                    profile_texts.append(f"🔗 {platform}")
-                elif 'facebook' in platform.lower():
-                    profile_texts.append(f"📘 {platform}")
-                else:
-                    profile_texts.append(f"🔗 {platform}")
-        
-        if profile_texts:
-            content_run = content_para.add_run('     '.join(profile_texts))
-            content_run.font.size = Pt(10)
-            content_run.font.name = 'Arial'
-        
-        # Add horizontal line to this row
-        _add_table_row_border(table.rows[current_row])
-        current_row += 1
-
-    # ==================== SUMMARY ====================
-    if summary:
-        label_cell = table.rows[current_row].cells[0]
-        content_cell = table.rows[current_row].cells[1]
-        
-        # Label
-        label_para = label_cell.paragraphs[0]
-        label_run = label_para.add_run('Summary')
-        label_run.font.bold = True
-        label_run.font.size = Pt(11)
-        label_run.font.name = 'Arial'
-        
-        # Content
-        content_para = content_cell.paragraphs[0]
-        content_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-        content_run = content_para.add_run(summary)
-        content_run.font.size = Pt(10)
-        content_run.font.name = 'Arial'
-        
-        # Add horizontal line
-        _add_table_row_border(table.rows[current_row])
-        current_row += 1
-
-    # ==================== EXPERIENCE ====================
-    if experiences:
-        label_cell = table.rows[current_row].cells[0]
-        content_cell = table.rows[current_row].cells[1]
-        
-        # Label
-        label_para = label_cell.paragraphs[0]
-        label_run = label_para.add_run('Experience')
-        label_run.font.bold = True
-        label_run.font.size = Pt(11)
-        label_run.font.name = 'Arial'
-        
-        # Content - clear default paragraph
-        content_cell._element.remove(content_cell.paragraphs[0]._element)
-        
-        for idx, exp in enumerate(experiences):
-            # Company name (bold) and dates on same line
-            exp_header = content_cell.add_paragraph()
-            exp_header.paragraph_format.space_after = Pt(0)
-            
-            company = exp.get('company', 'Company Name')
-            company_run = exp_header.add_run(company)
-            company_run.font.bold = True
-            company_run.font.size = Pt(11)
-            company_run.font.name = 'Arial'
-            
-            # Add dates on right
-            date_str = ''
-            if exp.get('start'):
-                date_str = exp['start']
-                if exp.get('end'):
-                    date_str += f" - {exp['end']}"
-            
-            if date_str:
-                from docx.enum.text import WD_TAB_ALIGNMENT
-                tab_stops = exp_header.paragraph_format.tab_stops
-                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
-                exp_header.add_run('\t')
-                date_run = exp_header.add_run(date_str)
-                date_run.font.size = Pt(10)
-                date_run.font.name = 'Arial'
-            
-            # Job title and location
-            role_para = content_cell.add_paragraph()
-            role_para.paragraph_format.space_after = Pt(2)
-            
-            role = exp.get('role', 'Job Title')
-            role_run = role_para.add_run(role)
-            role_run.font.size = Pt(10)
-            role_run.font.name = 'Arial'
-            
-            location = exp.get('location', '')
-            if location:
-                from docx.enum.text import WD_TAB_ALIGNMENT
-                tab_stops = role_para.paragraph_format.tab_stops
-                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
-                role_para.add_run('\t')
-                loc_run = role_para.add_run(location)
-                loc_run.font.size = Pt(10)
-                loc_run.font.name = 'Arial'
-            
-            # Description/bullets
-            bullets = exp.get('bullets', [])
-            if bullets:
-                for bullet in bullets:
-                    bullet_para = content_cell.add_paragraph()
-                    bullet_para.paragraph_format.space_after = Pt(3)
-                    bullet_para.paragraph_format.left_indent = Inches(0.1)
-                    bullet_run = bullet_para.add_run(f"• {bullet}")
-                    bullet_run.font.size = Pt(10)
-                    bullet_run.font.name = 'Arial'
-            
-            # Add spacing between experiences
-            if idx < len(experiences) - 1:
-                content_cell.add_paragraph().space_after = Pt(4)
-        
-        # Add horizontal line
-        _add_table_row_border(table.rows[current_row])
-        current_row += 1
-
-    # ==================== EDUCATION ====================
-    if education:
-        label_cell = table.rows[current_row].cells[0]
-        content_cell = table.rows[current_row].cells[1]
-        
-        # Label
-        label_para = label_cell.paragraphs[0]
-        label_run = label_para.add_run('Education')
-        label_run.font.bold = True
-        label_run.font.size = Pt(11)
-        label_run.font.name = 'Arial'
-        
-        # Content
-        content_cell._element.remove(content_cell.paragraphs[0]._element)
-
-        for edu in education:
-            # Institution and years
-            edu_header = content_cell.add_paragraph()
-            edu_header.paragraph_format.space_after = Pt(0)
-            
-            institution = edu.get('institution', 'Institution Name')
-            inst_run = edu_header.add_run(institution)
-            inst_run.font.bold = False
-            inst_run.font.size = Pt(10)
-            inst_run.font.name = 'Arial'
-            
-            years = edu.get('years', '')
-            if years:
-                from docx.enum.text import WD_TAB_ALIGNMENT
-                tab_stops = edu_header.paragraph_format.tab_stops
-                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
-                edu_header.add_run('\t')
-                years_run = edu_header.add_run(years)
-                years_run.font.size = Pt(10)
-                years_run.font.name = 'Arial'
-            
-            # Degree and type
-            degree_para = content_cell.add_paragraph()
-            degree_para.paragraph_format.space_after = Pt(4)
-            
-            degree = edu.get('degree', '')
-            degree_run = degree_para.add_run(degree)
-            degree_run.font.size = Pt(10)
-            degree_run.font.name = 'Arial'
-            
-            degree_type = edu.get('degree_type', '')
-            if degree_type:
-                from docx.enum.text import WD_TAB_ALIGNMENT
-                tab_stops = degree_para.paragraph_format.tab_stops
-                tab_stops.add_tab_stop(Inches(4.5), WD_TAB_ALIGNMENT.RIGHT)
-                degree_para.add_run('\t')
-                type_run = degree_para.add_run(degree_type)
-                type_run.font.size = Pt(10)
-                type_run.font.name = 'Arial'
-        
-        # Add horizontal line
-        _add_table_row_border(table.rows[current_row])
-        current_row += 1
-
-    # ==================== REFERENCES ====================
-    if references:
-        label_cell = table.rows[current_row].cells[0]
-        content_cell = table.rows[current_row].cells[1]
-        
-        # Label
-        label_para = label_cell.paragraphs[0]
-        label_run = label_para.add_run('References')
-        label_run.font.bold = True
-        label_run.font.size = Pt(11)
-        label_run.font.name = 'Arial'
-        
-        # Content
-        content_cell._element.remove(content_cell.paragraphs[0]._element)
-
-        for ref in references:
-            # Name (bold)
-            name_para = content_cell.add_paragraph()
-            name_para.paragraph_format.space_after = Pt(0)
-            name_run = name_para.add_run(ref.get('name', 'Reference Name'))
-            name_run.font.bold = True
-            name_run.font.size = Pt(10)
-            name_run.font.name = 'Arial'
-            
-            # Title
-            ref_title = ref.get('title', '')
-            if ref_title:
-                title_para = content_cell.add_paragraph(ref_title)
-                title_para.paragraph_format.space_after = Pt(0)
-                for run in title_para.runs:
-                    run.font.size = Pt(10)
-                    run.font.name = 'Arial'
-            
-            # Organization
-            ref_org = ref.get('organization', '')
-            if ref_org:
-                org_para = content_cell.add_paragraph(ref_org)
-                org_para.paragraph_format.space_after = Pt(6)
-                for run in org_para.runs:
-                    run.font.size = Pt(10)
-                    run.font.name = 'Arial'
-        
-        # Add horizontal line
-        _add_table_row_border(table.rows[current_row])
-        current_row += 1
-
-    # ==================== SKILLS ====================
-    if skills:
-        label_cell = table.rows[current_row].cells[0]
-        content_cell = table.rows[current_row].cells[1]
-        
-        # Label
-        label_para = label_cell.paragraphs[0]
-        label_run = label_para.add_run('Skills')
-        label_run.font.bold = True
-        label_run.font.size = Pt(11)
-        label_run.font.name = 'Arial'
-        
-        # Content - Two columns
-        content_cell._element.remove(content_cell.paragraphs[0]._element)
-        
-        # Create paragraph with tab stop for two-column layout
-        skills_para = content_cell.add_paragraph()
-        from docx.enum.text import WD_TAB_ALIGNMENT
-        tab_stops = skills_para.paragraph_format.tab_stops
-        tab_stops.add_tab_stop(Inches(2.65), WD_TAB_ALIGNMENT.LEFT)
-        
-        # Split skills into two columns
-        mid = (len(skills) + 1) // 2
-        col1 = skills[:mid]
-        col2 = skills[mid:]
-        
-        # Layout skills in two columns
-        for i in range(max(len(col1), len(col2))):
-            skill_line = content_cell.add_paragraph()
-            skill_line.paragraph_format.space_after = Pt(2)
-            
-            # Column 1
-            if i < len(col1):
-                skill1_run = skill_line.add_run(col1[i])
-                skill1_run.font.size = Pt(10)
-                skill1_run.font.name = 'Arial'
-            
-            # Tab to column 2
-            skill_line.add_run('\t')
-            
-            # Column 2
-            if i < len(col2):
-                skill2_run = skill_line.add_run(col2[i])
-                skill2_run.font.size = Pt(10)
-                skill2_run.font.name = 'Arial'
-        
-        # Add horizontal line (last row)
-        _add_table_row_border(table.rows[current_row])
-
-    # Save to bytes
-    buffer = BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-
-    logger.info("[renderer] Generated CV DOCX with template_1")
-    return buffer.getvalue()
 
 
 def render_cover_letter(job: Job) -> bytes:
     """
-    Generate cover letter DOCX
+    Generate professional cover letter DOCX following HR industry standards.
     """
     answers = job.answers or {}
     basics = answers.get("basics", {})
-    role = answers.get("cover_role") or answers.get("target_role") or "the role"
-    company = answers.get("cover_company", "your company")
-    highlights = answers.get("cover_highlights", [])
-    summary = answers.get("summary", "")
+    
+    # Extract all data
+    name = basics.get("name", "Your Name")
+    email = basics.get("email", "")
+    phone = basics.get("phone", "")
+    location = basics.get("location", "")
+    linkedin = basics.get("linkedin", "")
+    
+    role = answers.get("cover_role", "Position Title")
+    company = answers.get("cover_company", "Company Name")
+    years_exp = answers.get("years_experience", "X years")
+    industries = answers.get("industries", "relevant industries")
+    interest_reason = answers.get("interest_reason", "this exciting opportunity")
+    current_title = answers.get("current_title", "Your Current Title")
+    current_employer = answers.get("current_employer", "Current Employer")
+    achievement_1 = answers.get("achievement_1", "")
+    achievement_2 = answers.get("achievement_2", "")
+    key_skills = answers.get("cover_key_skills", [])
+    company_goal = answers.get("company_goal", "the organization's goals")
 
     doc = Document()
 
-    # Set margins
+    # Set margins - professional business letter format
     for section in doc.sections:
         section.top_margin = Inches(1)
         section.bottom_margin = Inches(1)
         section.left_margin = Inches(1)
         section.right_margin = Inches(1)
 
-    # Header
-    header_lines = []
-    name = basics.get("name")
-    if name:
-        header_lines.append(name)
-    contact_parts = [part for part in [basics.get("email"), basics.get("phone"), basics.get("location")] if part]
+    # ==================== HEADER (Contact Info) ====================
+    # Name
+    name_para = doc.add_paragraph(name)
+    name_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    name_para.paragraph_format.space_after = Pt(2)
+    for run in name_para.runs:
+        run.font.name = 'Calibri'
+        run.font.size = Pt(12)
+        run.font.bold = True
+    
+    # Contact line: LinkedIn | Phone | Email
+    contact_parts = []
+    if linkedin:
+        contact_parts.append(linkedin)
+    if phone:
+        contact_parts.append(phone)
+    if email:
+        contact_parts.append(email)
+    
     if contact_parts:
-        header_lines.append(" | ".join(contact_parts))
+        contact_para = doc.add_paragraph(" | ".join(contact_parts))
+        contact_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        contact_para.paragraph_format.space_after = Pt(20)
+        for run in contact_para.runs:
+            run.font.name = 'Calibri'
+            run.font.size = Pt(11)
 
-    for line in header_lines:
-        para = doc.add_paragraph(line)
-        para.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        _set_body_font(para)
+    # ==================== DATE ====================
+    from datetime import datetime
+    date_para = doc.add_paragraph(datetime.now().strftime("%B %d, %Y"))
+    date_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    date_para.paragraph_format.space_after = Pt(20)
+    for run in date_para.runs:
+        run.font.name = 'Calibri'
+        run.font.size = Pt(11)
 
-    doc.add_paragraph()  # spacer
+    # ==================== GREETING ====================
+    greeting_para = doc.add_paragraph("Dear Hiring Manager,")
+    greeting_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    greeting_para.paragraph_format.space_after = Pt(12)
+    for run in greeting_para.runs:
+        run.font.name = 'Calibri'
+        run.font.size = Pt(11)
 
-    # Greeting
-    greet = f"Dear Hiring Manager{f' at {company}' if company else ''},"
-    greet_para = doc.add_paragraph(greet)
-    _set_body_font(greet_para)
-
-    # Opening
-    opening = f"I am excited to apply for the {role} position at {company}."
+    # ==================== OPENING PARAGRAPH ====================
+    opening = (
+        f"I am writing to express my interest in the {role} role at {company}. "
+        f"With {years_exp} of progressive experience across {industries}, I deliver measurable "
+        f"improvements in key areas of responsibility. I am particularly excited about this "
+        f"opportunity because {interest_reason}."
+    )
     opening_para = doc.add_paragraph(opening)
-    _set_body_font(opening_para)
+    opening_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    opening_para.paragraph_format.space_after = Pt(12)
+    for run in opening_para.runs:
+        run.font.name = 'Calibri'
+        run.font.size = Pt(11)
 
-    # Summary / pitch
-    if summary:
-        summary_para = doc.add_paragraph(summary)
-        _set_body_font(summary_para)
+    # ==================== BODY PARAGRAPH (Experience & Achievements) ====================
+    body_text = (
+        f"In my current/most recent role as {current_title} at {current_employer}, "
+        f"{achievement_1}"
+    )
+    
+    if achievement_2:
+        body_text += f" I also {achievement_2}"
+    
+    body_para = doc.add_paragraph(body_text)
+    body_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    body_para.paragraph_format.space_after = Pt(12)
+    for run in body_para.runs:
+        run.font.name = 'Calibri'
+        run.font.size = Pt(11)
 
-    # Highlights
-    if highlights:
-        highlights_intro = doc.add_paragraph("Selected achievements:")
-        _set_body_font(highlights_intro)
-        for h in highlights:
-            bullet = doc.add_paragraph(h, style="List Bullet")
-            _set_body_font(bullet)
+    # ==================== SKILLS PARAGRAPH ====================
+    if key_skills:
+        skills_text = ", ".join(key_skills[:-1])
+        if len(key_skills) > 1:
+            skills_text += f", and {key_skills[-1]}"
+        else:
+            skills_text = key_skills[0] if key_skills else ""
+        
+        skills_para_text = (
+            f"I bring a pragmatic combination of strategic leadership and hands-on operational "
+            f"execution: {skills_text}. I would welcome the chance to discuss how my experience "
+            f"in these areas can support {company}'s goals for {company_goal}."
+        )
+        
+        skills_para = doc.add_paragraph(skills_para_text)
+        skills_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        skills_para.paragraph_format.space_after = Pt(12)
+        for run in skills_para.runs:
+            run.font.name = 'Calibri'
+            run.font.size = Pt(11)
 
-    # Closing
-    closing_lines = [
-        "I would welcome the opportunity to discuss how my experience aligns with your needs.",
-        "Thank you for your time and consideration.",
-        "",
-        "Sincerely,"
-    ]
-    for line in closing_lines:
-        para = doc.add_paragraph(line)
-        _set_body_font(para)
+    # ==================== CLOSING PARAGRAPH ====================
+    closing_text = (
+        "Thank you for considering my application. I have attached my resume and I am available "
+        "for a conversation at your convenience. I look forward to the possibility of contributing "
+        "to your team."
+    )
+    closing_para = doc.add_paragraph(closing_text)
+    closing_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    closing_para.paragraph_format.space_after = Pt(20)
+    for run in closing_para.runs:
+        run.font.name = 'Calibri'
+        run.font.size = Pt(11)
 
-    if name:
-        sign = doc.add_paragraph(name)
-        _set_body_font(sign)
+    # ==================== SIGNATURE ====================
+    sincerely_para = doc.add_paragraph("Sincerely,")
+    sincerely_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    sincerely_para.paragraph_format.space_after = Pt(20)
+    for run in sincerely_para.runs:
+        run.font.name = 'Calibri'
+        run.font.size = Pt(11)
+    
+    signature_para = doc.add_paragraph(name)
+    signature_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    signature_para.paragraph_format.space_after = Pt(2)
+    for run in signature_para.runs:
+        run.font.name = 'Calibri'
+        run.font.size = Pt(11)
+    
+    # Contact line in signature
+    if contact_parts:
+        sig_contact_para = doc.add_paragraph(" | ".join(contact_parts))
+        sig_contact_para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        for run in sig_contact_para.runs:
+            run.font.name = 'Calibri'
+            run.font.size = Pt(10)
 
+    # Save to bytes
     buffer = BytesIO()
     doc.save(buffer)
     buffer.seek(0)
 
-    logger.info(f"[renderer] Generated cover letter DOCX for job.id={job.id}")
+    logger.info(f"[renderer] Generated professional cover letter DOCX for job.id={job.id}")
     return buffer.getvalue()
 
 

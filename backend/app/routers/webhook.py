@@ -322,36 +322,28 @@ Type /upgrade to get premium access now!""")
             logger.info(f"[send_pdf] User uploaded edited DOCX, using LibreOffice conversion")
             pdf_bytes, pdf_filename = storage.convert_docx_to_pdf(latest_uploaded_docx)
         else:
-            # No upload - generate PDF directly from data (avoids LibreOffice table issues)
+            # No upload - generate PDF directly from data (all templates use ReportLab now)
             logger.info(f"[send_pdf] No edited DOCX, generating PDF directly from data")
             template = latest_job.answers.get('template', 'template_1')
             
-            # Only template_1 has direct PDF generation (others use LibreOffice)
-            if template == 'template_1':
-                try:
-                    pdf_bytes = pdf_renderer.render_pdf_from_data(latest_job.answers, template)
-                    # Generate filename
-                    doc_type = latest_job.type or 'document'
-                    from datetime import datetime
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    pdf_filename = f"{doc_type}_{template}_{timestamp}.pdf"
-                except Exception as e:
-                    logger.error(f"[send_pdf] Direct PDF generation failed: {e}")
-                    # Fallback to LibreOffice conversion
-                    job_output_dir = Path("output") / "jobs" / latest_job.id
-                    if job_output_dir.exists():
-                        docx_files = list(job_output_dir.glob("*.docx"))
-                        if docx_files:
-                            latest_docx_path = max(docx_files, key=lambda p: p.stat().st_mtime)
-                            pdf_bytes, pdf_filename = storage.convert_docx_to_pdf(latest_docx_path)
-            else:
-                # For other templates, use LibreOffice (they don't have table issues)
+            # All templates now have direct PDF generation
+            try:
+                pdf_bytes = pdf_renderer.render_pdf_from_data(latest_job.answers, template)
+                # Generate filename
+                doc_type = latest_job.type or 'document'
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                pdf_filename = f"{doc_type}_{template}_{timestamp}.pdf"
+                logger.info(f"[send_pdf] Successfully generated PDF using ReportLab for {template}")
+            except Exception as e:
+                logger.error(f"[send_pdf] Direct PDF generation failed: {e}")
+                # Fallback to LibreOffice conversion as last resort
                 job_output_dir = Path("output") / "jobs" / latest_job.id
                 if job_output_dir.exists():
                     docx_files = list(job_output_dir.glob("*.docx"))
                     if docx_files:
                         latest_docx_path = max(docx_files, key=lambda p: p.stat().st_mtime)
-                        logger.info(f"[send_pdf] Using LibreOffice for {template}")
+                        logger.info(f"[send_pdf] Falling back to LibreOffice for {template}")
                         pdf_bytes, pdf_filename = storage.convert_docx_to_pdf(latest_docx_path)
 
         if not pdf_bytes:
@@ -430,6 +422,12 @@ async def handle_callback_query(callback_query: dict, db):
             elif reply:
                 await reply_text(chat_id, reply)
 
+        elif data == "plan_premium":
+            # User clicked "Start with Premium Plan"
+            reply = await handle_inbound(db, str(chat_id), "/upgrade", telegram_username=username)
+            if reply:
+                await reply_text(chat_id, reply)
+
         elif data == "learn_more":
             # Show more info about the service
             info_msg = """📚 *About Career Buddy*
@@ -439,8 +437,8 @@ I'm an AI-powered assistant that helps you create professional career documents 
 *🎯 What I create:*
 • Professional Resumes (1-2 pages)
 • Detailed CVs
+• Professional Cover Letters
 • Revamped/improved existing documents
-• Cover Letters (coming soon!)
 
 *✨ Features:*
 • AI-enhanced content
@@ -459,12 +457,9 @@ Ready to create? Type /start!"""
         elif data.startswith("doc_"):
             # Document type selected
             doc_type = data.replace("doc_", "")
-            if doc_type == "cover":
-                await reply_text(chat_id, "📝 *Cover Letter generation is coming soon!*\n\nFor now, try creating a Resume or CV. Type /start to begin!")
-            else:
-                reply = await handle_inbound(db, str(chat_id), doc_type, telegram_username=username)
-                if reply:
-                    await reply_text(chat_id, reply)
+            reply = await handle_inbound(db, str(chat_id), doc_type, telegram_username=username)
+            if reply:
+                await reply_text(chat_id, reply)
 
         elif data.startswith("template_"):
             # Template selected
@@ -627,22 +622,57 @@ async def paystack_webhook(request: Request, db=Depends(get_db)):
             if status == "success":
                 user_id = metadata.get("user_id")
                 telegram_user_id = metadata.get("telegram_user_id")
+                purpose = metadata.get("role")  # Can be "premium_upgrade" or a target role
 
                 if user_id:
                     from app.services import payments
                     from app.services.telegram import reply_text
+                    from app.models import User
 
                     # Record payment
                     payments.record_payment(db, user_id, reference, amount, metadata, raw_payload=payload)
 
-                    # Notify user
-                    if telegram_user_id:
-                        await reply_text(
-                            telegram_user_id,
-                            "✅ *Payment confirmed!*\n\n"
-                            "Your document generation is now unlocked. "
-                            "Return to your conversation and type *paid* to continue."
-                        )
+                    # Check if this is a premium upgrade payment
+                    if purpose == "premium_upgrade":
+                        # Upgrade user to pro tier
+                        user = db.query(User).filter(User.id == user_id).first()
+                        if user:
+                            user.tier = "pro"
+                            db.commit()
+                            logger.info(f"[paystack_webhook] User {user_id} upgraded to pro tier")
+
+                            # Notify user of upgrade
+                            if telegram_user_id:
+                                await reply_text(
+                                    telegram_user_id,
+                                    """🎉 *Payment Confirmed - You're Now Premium!*
+
+✅ Account upgraded successfully
+
+You now have access to:
+• 🎨 Multiple professional templates
+• 📄 Unlimited PDF conversions
+• 🚀 Priority AI enhancements
+• 💼 All document types (Resume, CV, Cover Letter, Revamp)
+
+*🚀 Ready to create?*
+Type /start to see the menu, then choose:
+• *Resume* - Professional 1-2 page resume
+• *CV* - Detailed curriculum vitae
+• *Cover Letter* - Tailored application letter
+• *Revamp* - Improve an existing document
+
+Or simply type what you want to create!"""
+                                )
+                    else:
+                        # Regular document generation payment
+                        if telegram_user_id:
+                            await reply_text(
+                                telegram_user_id,
+                                "✅ *Payment confirmed!*\n\n"
+                                "Your document generation is now unlocked. "
+                                "Return to your conversation and type *paid* to continue."
+                            )
 
                     logger.info(f"[paystack_webhook] Payment processed: {reference} for user {user_id}")
                 else:
