@@ -23,6 +23,7 @@ GREETINGS = {"hi", "hello", "hey", "start", "menu", "/start"}
 RESETS = {"reset", "/reset", "restart"}
 HELP_COMMANDS = {"/help", "help"}
 STATUS_COMMANDS = {"/status", "status"}
+HISTORY_COMMANDS = {"/history", "history", "my documents", "documents"}
 UPGRADE_COMMANDS = {"/upgrade", "upgrade"}
 PAYMENT_BYPASS_PHRASES = {"payment made", "paid", "payment done", "payment complete"}
 ADMIN_COMMANDS = {"/admin", "/stats", "/broadcast", "/sample", "/makeadmin", "/setpro"}
@@ -1158,56 +1159,63 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
 
 
 async def get_admin_stats(db: Session) -> str:
-    """Get bot statistics for admin."""
-    from sqlalchemy import func
-    from datetime import datetime, timedelta
-    import json
+    """Get comprehensive bot statistics for admin using analytics service."""
+    from app.services import analytics
+    from datetime import datetime
     
-    # Total users
-    total_users = db.query(User).count()
+    # Get comprehensive analytics
+    stats = analytics.get_system_analytics(db, days=7)
     
-    # New users (last 7 days)
-    seven_days_ago = datetime.now() - timedelta(days=7)
-    new_users = db.query(User).filter(User.created_at >= seven_days_ago).count()
+    if 'error' in stats:
+        return f"❌ Error generating stats: {stats['error']}"
     
-    # Active jobs
-    active_jobs = db.query(Job).filter(Job.status.in_(["collecting", "preview_ready", "finalizing"])).count()
+    users = stats['users']
+    docs = stats['documents']
+    payments = stats['payments']
+    engagement = stats['engagement']
     
-    # Completed jobs
-    completed_jobs = db.query(Job).filter(Job.status == "completed").count()
-    
-    # Total messages
-    total_messages = db.query(Message).count()
-    
-    # Documents by type
-    resume_count = db.query(Job).filter(Job.type == "resume").count()
-    cv_count = db.query(Job).filter(Job.type == "cv").count()
-    revamp_count = db.query(Job).filter(Job.type == "revamp").count()
-    
-    # User tier breakdown
-    free_users = db.query(User).filter(User.tier == "free").count()
-    pro_users = db.query(User).filter(User.tier == "pro").count()
-    
-    stats_msg = f"""📊 *Career Buddy - Admin Stats*
+    stats_msg = f"""📊 *Career Buddy - Analytics Dashboard*
+_Last 7 days overview_
 
-*👥 Users*
-• Total: {total_users}
-• New (7 days): {new_users}
-• Free tier: {free_users}
-• Pro tier: {pro_users}
+*👥 USER METRICS*
+• Total Users: {users['total']}
+• New Users: {users['new']}
+• Active Users: {users['active']}
+• Premium: {users['premium']} ({users['premium_percentage']}%)
+• Free: {users['free']}
 
-*📄 Documents*
-• Active jobs: {active_jobs}
-• Completed: {completed_jobs}
-• Resumes: {resume_count}
-• CVs: {cv_count}
-• Revamps: {revamp_count}
+*📄 DOCUMENT METRICS*
+• Total Generated: {docs['total']}
+• Recent (7d): {docs['recent']}
+• Avg per User: {docs['avg_per_user']}
 
-*💬 Activity*
-• Total messages: {total_messages}
-• Avg per user: {total_messages / total_users if total_users > 0 else 0:.1f}
+_By Type:_
+• 📄 Resumes: {docs['resumes']}
+• 📋 CVs: {docs['cvs']}
+• 📝 Cover Letters: {docs['cover_letters']}
+• ✨ Revamps: {docs['revamps']}
 
-_Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC_"""
+*💰 REVENUE METRICS*
+• Transactions: {payments['total_transactions']}
+• Revenue: ₦{payments['total_revenue']:,.0f}
+• Avg Transaction: ₦{payments['avg_transaction']:,.0f}
+
+*💬 ENGAGEMENT*
+• Total Messages: {engagement['total_messages']}
+• Recent (7d): {engagement['recent_messages']}
+• Avg per User: {engagement['avg_messages_per_user']}
+
+"""
+    
+    # Add top users
+    if stats.get('top_users'):
+        stats_msg += "*🏆 TOP USERS*\n"
+        for user in stats['top_users'][:3]:
+            tier_emoji = "⭐" if user['tier'] == "pro" else "🆓"
+            stats_msg += f"{tier_emoji} {user['username']}: {user['documents']} docs\n"
+        stats_msg += "\n"
+    
+    stats_msg += f"_Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC_"
     
     return stats_msg
 
@@ -1557,6 +1565,39 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         
         status_msg += "\nReady to create? Type /start!"
         return status_msg
+
+    # 1.7.5) History command
+    if t_lower in HISTORY_COMMANDS:
+        logger.info(f"[handle_inbound] Processing /history command for user {telegram_user_id}")
+        from app.services import document_history
+        
+        # Get document counts
+        counts = document_history.count_user_documents(db, user.id)
+        
+        # Get recent documents
+        history = document_history.get_user_document_history(db, user.id, limit=5)
+        
+        history_msg = f"""📚 *Your Document History*
+
+📊 Total Documents: {counts['total']}
+• 📄 Resumes: {counts['resumes']}
+• 📋 CVs: {counts['cvs']}
+• 📝 Cover Letters: {counts['cover_letters']}
+• ✨ Revamps: {counts['revamps']}
+
+"""
+        
+        if history:
+            history_msg += "*Recent Documents:*\n\n"
+            for idx, doc in enumerate(history, 1):
+                history_msg += f"{idx}. *{doc['type']}* - {doc['name']}\n"
+                history_msg += f"   Role: {doc['target_role']}\n"
+                history_msg += f"   Created: {doc['created_at']}\n\n"
+        else:
+            history_msg += "_You haven't created any documents yet._\n\n"
+        
+        history_msg += "Ready to create more? Type /start!"
+        return history_msg
 
     # 1.8) Upgrade command
     if t_lower in UPGRADE_COMMANDS:

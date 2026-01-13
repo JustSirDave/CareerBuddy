@@ -12,6 +12,7 @@ from sqlalchemy import text
 from app.routers.webhook import router as webhook_router
 from app.config import settings
 from app.db import get_db
+from app.middleware import RateLimitMiddleware, rate_limiter
 
 app = FastAPI(title="CareerBuddy Backend")
 
@@ -79,5 +80,6 @@ async def download_file(job_id: str, filename: str):
 
 
 app.add_middleware(RequestLogMiddleware)
+app.add_middleware(RateLimitMiddleware, rate_limiter=rate_limiter)
 
 app.include_router(webhook_router)

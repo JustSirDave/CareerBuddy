@@ -1,3 +1,15 @@
+"""
+File model for S3/R2 cloud storage integration.
+
+NOTE: This model is implemented but NOT YET INTEGRATED into the application workflow.
+Currently, documents are stored locally on the filesystem.
+This model is ready for future cloud storage migration.
+
+To integrate:
+1. Call storage.upload_file() after document generation
+2. Store storage_key in this table
+3. Use storage.get_download_url() for serving files
+"""
 from sqlalchemy import Column, String, DateTime, Integer, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func

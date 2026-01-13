@@ -1,6 +1,15 @@
 """
 File Storage Service - S3/Cloudflare R2 integration
 Handles document uploads and generates signed URLs
+
+NOTE: This service is implemented but NOT YET INTEGRATED into the application.
+Documents are currently stored locally on the filesystem.
+This service is ready for cloud storage migration when needed.
+
+To integrate:
+1. Set S3_ACCESS_KEY_ID and S3_BUCKET environment variables
+2. Call upload_file() after generating documents
+3. Replace local file serving with presigned URLs
 """
 import hashlib
 from typing import Optional
