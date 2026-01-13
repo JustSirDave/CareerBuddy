@@ -143,6 +143,33 @@ def _log_state(when: str, job: Job | None):
     )
 
 
+def _generate_filename(job: Job) -> str:
+    """
+    Generate a user-friendly filename: "Name - Document Type.docx"
+    Example: "John Doe - Resume.docx", "Jane Smith - CV.docx"
+    """
+    answers = job.answers or {}
+    basics = answers.get('basics', {})
+    name = basics.get('name', 'Document')
+    
+    # Clean name for filename (remove special characters)
+    import re
+    clean_name = re.sub(r'[<>:"/\\|?*]', '', name)
+    
+    # Map job types to display names
+    doc_type_map = {
+        'resume': 'Resume',
+        'cv': 'CV',
+        'cover': 'Cover Letter',
+        'revamp': 'Revamp'
+    }
+    
+    doc_type = doc_type_map.get(job.type, job.type.capitalize())
+    filename = f"{clean_name} - {doc_type}.docx"
+    
+    return filename
+
+
 def _format_preview(answers: dict) -> str:
     """Format a preview of all collected information for user review."""
     basics = answers.get("basics", {})
@@ -758,8 +785,8 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
             else:
                 doc_bytes = renderer.render_resume(job)
 
-            # Save file locally for backup
-            filename = f"{job.type}_{job.id[:8]}.docx"
+            # Save file locally with user-friendly name
+            filename = _generate_filename(job)
             file_path = storage.save_file_locally(job.id, doc_bytes, filename)
 
             # Store document temporarily for sending via Telegram
@@ -876,7 +903,7 @@ Reply *yes* to generate your improved document, or */reset* to start over."""
                 # Render revamped document
                 logger.info(f"[revamp] Rendering revamped document for job.id={job.id}")
                 doc_bytes = renderer.render_revamp(job)
-                filename = f"revamp_{job.id[:8]}.docx"
+                filename = _generate_filename(job)
                 file_path = storage.save_file_locally(job.id, doc_bytes, filename)
 
                 job.draft_text = file_path
@@ -1073,7 +1100,7 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
             try:
                 logger.info(f"[cover] Rendering cover letter for job.id={job.id}")
                 doc_bytes = renderer.render_cover_letter(job)
-                filename = f"cover_{job.id[:8]}.docx"
+                filename = _generate_filename(job)
                 file_path = storage.save_file_locally(job.id, doc_bytes, filename)
 
                 job.draft_text = file_path
@@ -1360,10 +1387,8 @@ async def generate_sample_document(db: Session, user_id: int, template_choice: s
         else:  # resume
             doc_bytes = renderer.render_resume(job)
         
-        # Generate filename
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"sample_{doc_type}_{template_choice}_{timestamp}.docx"
+        # Generate user-friendly filename for sample
+        filename = _generate_filename(job)
         
         # Save to storage
         file_path = storage.save_file_locally(job.id, doc_bytes, filename)
