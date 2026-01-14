@@ -1,11 +1,12 @@
 """
 CareerBuddy - Payment Service
-Payment and generation limit management service.
+Payment and quota management service with monthly resets.
 Author: Sir Dave
 """
 import json
 import httpx
-from typing import Dict, Tuple
+from datetime import datetime, timedelta
+from typing import Dict, Tuple, Literal
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -13,87 +14,218 @@ from app.config import settings
 from app.models import User, Payment
 
 
-# Generation limits
-FREE_TIER_LIMIT = 2  # Free users get 2 documents total
-PAID_GENERATION_PRICE = 7500  # ₦7,500 per generation
-MAX_GENERATIONS_PER_ROLE = 5  # Max 5 documents per role
+# Document type definitions
+DocumentType = Literal["resume", "cv", "cover_letter", "revamp"]
+
+# Pricing
+PREMIUM_PACKAGE_PRICE = 7500  # ₦7,500 per month
+
+# Quota limits by tier and document type
+QUOTA_LIMITS = {
+    "free": {
+        "resume": 1,
+        "cv": 1,
+        "cover_letter": 0,  # Not allowed
+        "revamp": 1,
+        "pdf_allowed": False,
+    },
+    "pro": {
+        "resume": 2,
+        "cv": 2,
+        "cover_letter": 1,
+        "revamp": 1,
+        "pdf_allowed": True,
+    }
+}
 
 
-def get_generation_counts(user: User) -> Dict[str, int]:
+def get_document_counts(user: User) -> Dict[str, int]:
     """
     Parse user's generation_count JSON field.
 
     Returns:
-        Dict mapping role names to generation counts
+        Dict mapping document types to generation counts
+        Example: {"resume": 1, "cv": 0, "cover_letter": 1, "revamp": 0}
     """
     try:
         if isinstance(user.generation_count, str):
-            return json.loads(user.generation_count)
-        return user.generation_count or {}
+            counts = json.loads(user.generation_count)
+        else:
+            counts = user.generation_count or {}
+        
+        # Ensure all document types are present
+        for doc_type in ["resume", "cv", "cover_letter", "revamp"]:
+            if doc_type not in counts:
+                counts[doc_type] = 0
+        
+        return counts
     except (json.JSONDecodeError, TypeError):
         logger.warning(f"[payments] Invalid generation_count for user {user.id}, resetting")
-        return {}
+        return {"resume": 0, "cv": 0, "cover_letter": 0, "revamp": 0}
 
 
-def update_generation_count(db: Session, user: User, role: str):
+def check_and_reset_quota(db: Session, user: User) -> bool:
     """
-    Increment generation count for a specific role.
-
+    Check if user's quota needs to be reset (monthly).
+    
     Args:
         db: Database session
         user: User model
-        role: Target role name
+        
+    Returns:
+        True if quota was reset, False otherwise
     """
-    counts = get_generation_counts(user)
-    counts[role] = counts.get(role, 0) + 1
-    user.generation_count = json.dumps(counts)
-    db.commit()
-    logger.info(f"[payments] Updated generation count for user {user.id}, role '{role}': {counts[role]}")
+    now = datetime.utcnow()
+    
+    # Initialize quota_reset_at if not set
+    if not user.quota_reset_at:
+        user.quota_reset_at = now + timedelta(days=30)
+        db.commit()
+        logger.info(f"[payments] Initialized quota_reset_at for user {user.id}")
+        return False
+    
+    # Check if reset is due
+    if now >= user.quota_reset_at:
+        # Reset quota
+        user.generation_count = json.dumps({"resume": 0, "cv": 0, "cover_letter": 0, "revamp": 0})
+        user.quota_reset_at = now + timedelta(days=30)
+        db.commit()
+        logger.info(f"[payments] Reset quota for user {user.id}, next reset: {user.quota_reset_at}")
+        return True
+    
+    return False
 
 
-def get_total_generations(user: User) -> int:
-    """Get total number of generations across all roles."""
-    counts = get_generation_counts(user)
-    return sum(counts.values())
-
-
-def can_generate(user: User, role: str) -> Tuple[bool, str]:
+def check_premium_expiry(db: Session, user: User) -> bool:
     """
-    Check if user can generate a document for the given role.
+    Check if user's premium has expired and downgrade if necessary.
+    
+    Args:
+        db: Database session
+        user: User model
+        
+    Returns:
+        True if user was downgraded, False otherwise
+    """
+    now = datetime.utcnow()
+    
+    # If user is pro but premium has expired
+    if user.tier == "pro" and user.premium_expires_at and now >= user.premium_expires_at:
+        user.tier = "free"
+        db.commit()
+        logger.info(f"[payments] Premium expired for user {user.id}, downgraded to free")
+        return True
+    
+    return False
+
+
+def can_generate_document(user: User, doc_type: DocumentType) -> Tuple[bool, str]:
+    """
+    Check if user can generate a document of the given type.
 
     Args:
         user: User model
-        role: Target role name
+        doc_type: Document type (resume, cv, cover_letter, revamp)
 
     Returns:
         Tuple of (can_generate: bool, reason: str)
     """
-    counts = get_generation_counts(user)
-    role_count = counts.get(role, 0)
-    total_count = sum(counts.values())
-
-    # Check per-role limit (applies to all users)
-    if role_count >= MAX_GENERATIONS_PER_ROLE:
-        return False, f"max_per_role|{role}"
-
-    # Check free tier limit
-    if user.tier == "free":
-        if total_count >= FREE_TIER_LIMIT:
-            return False, "free_limit_reached"
-        return True, ""
-
-    # Pro tier users can generate (they pay per generation)
+    # Get current counts
+    counts = get_document_counts(user)
+    current_count = counts.get(doc_type, 0)
+    
+    # Get limit for this tier and document type
+    tier_limits = QUOTA_LIMITS.get(user.tier, QUOTA_LIMITS["free"])
+    limit = tier_limits.get(doc_type, 0)
+    
+    # Check if document type is allowed
+    if limit == 0:
+        return False, f"document_not_allowed|{doc_type}"
+    
+    # Check if quota exceeded
+    if current_count >= limit:
+        return False, f"quota_exceeded|{doc_type}|{limit}"
+    
     return True, ""
 
 
-async def create_payment_link(user: User, role: str, amount: int = PAID_GENERATION_PRICE) -> Dict:
+def can_use_pdf(user: User) -> bool:
     """
-    Create a Paystack payment link for document generation.
+    Check if user can request PDF format.
+    
+    Args:
+        user: User model
+        
+    Returns:
+        True if PDF is allowed, False otherwise
+    """
+    tier_limits = QUOTA_LIMITS.get(user.tier, QUOTA_LIMITS["free"])
+    return tier_limits.get("pdf_allowed", False)
+
+
+def update_document_count(db: Session, user: User, doc_type: DocumentType):
+    """
+    Increment generation count for a specific document type.
+
+    Args:
+        db: Database session
+        user: User model
+        doc_type: Document type
+    """
+    counts = get_document_counts(user)
+    counts[doc_type] = counts.get(doc_type, 0) + 1
+    user.generation_count = json.dumps(counts)
+    db.commit()
+    logger.info(f"[payments] Updated {doc_type} count for user {user.id}: {counts[doc_type]}")
+
+
+def get_quota_status(user: User) -> Dict[str, any]:
+    """
+    Get user's current quota status.
+    
+    Args:
+        user: User model
+        
+    Returns:
+        Dict with quota information
+    """
+    counts = get_document_counts(user)
+    tier_limits = QUOTA_LIMITS.get(user.tier, QUOTA_LIMITS["free"])
+    
+    return {
+        "tier": user.tier,
+        "resume": {
+            "used": counts["resume"],
+            "limit": tier_limits["resume"],
+            "remaining": tier_limits["resume"] - counts["resume"]
+        },
+        "cv": {
+            "used": counts["cv"],
+            "limit": tier_limits["cv"],
+            "remaining": tier_limits["cv"] - counts["cv"]
+        },
+        "cover_letter": {
+            "used": counts["cover_letter"],
+            "limit": tier_limits["cover_letter"],
+            "remaining": tier_limits["cover_letter"] - counts["cover_letter"]
+        },
+        "revamp": {
+            "used": counts["revamp"],
+            "limit": tier_limits["revamp"],
+            "remaining": tier_limits["revamp"] - counts["revamp"]
+        },
+        "pdf_allowed": tier_limits["pdf_allowed"],
+        "quota_resets_at": user.quota_reset_at.isoformat() if user.quota_reset_at else None,
+        "premium_expires_at": user.premium_expires_at.isoformat() if user.premium_expires_at else None,
+    }
+
+
+async def create_premium_payment_link(user: User) -> Dict:
+    """
+    Create a Paystack payment link for premium package purchase.
 
     Args:
         user: User model
-        role: Target role for generation
-        amount: Amount in Naira (kobo will be calculated)
 
     Returns:
         Dict with payment link details or error
@@ -110,7 +242,7 @@ async def create_payment_link(user: User, role: str, amount: int = PAID_GENERATI
         }
 
         # Paystack expects amount in kobo (1 Naira = 100 kobo)
-        amount_kobo = amount * 100
+        amount_kobo = PREMIUM_PACKAGE_PRICE * 100
 
         payload = {
             "email": user.email or f"user_{user.telegram_user_id}@careerbuddy.temp",
@@ -118,10 +250,9 @@ async def create_payment_link(user: User, role: str, amount: int = PAID_GENERATI
             "metadata": {
                 "user_id": user.id,
                 "telegram_user_id": user.telegram_user_id,
-                "role": role,
-                "purpose": "document_generation"
+                "purpose": "premium_package",
+                "package": "monthly"
             },
-            # route lives under /webhooks/paystack
             "callback_url": f"{settings.public_url}/webhooks/paystack"
         }
 
@@ -136,7 +267,7 @@ async def create_payment_link(user: User, role: str, amount: int = PAID_GENERATI
 
             if data.get("status"):
                 payment_data = data.get("data", {})
-                logger.info(f"[payments] Payment link created for user {user.id}: {payment_data.get('reference')}")
+                logger.info(f"[payments] Premium payment link created for user {user.id}: {payment_data.get('reference')}")
                 return {
                     "authorization_url": payment_data.get("authorization_url"),
                     "access_code": payment_data.get("access_code"),
@@ -191,6 +322,35 @@ async def verify_payment(reference: str) -> Dict:
         return {"error": str(e)}
 
 
+def upgrade_to_premium(db: Session, user: User) -> bool:
+    """
+    Upgrade user to premium tier.
+    
+    Args:
+        db: Database session
+        user: User model
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        now = datetime.utcnow()
+        user.tier = "pro"
+        user.premium_expires_at = now + timedelta(days=30)  # 30 days from now
+        
+        # Reset quota to premium limits
+        user.generation_count = json.dumps({"resume": 0, "cv": 0, "cover_letter": 0, "revamp": 0})
+        user.quota_reset_at = now + timedelta(days=30)
+        
+        db.commit()
+        logger.info(f"[payments] Upgraded user {user.id} to premium, expires: {user.premium_expires_at}")
+        return True
+    except Exception as e:
+        logger.error(f"[payments] Failed to upgrade user {user.id}: {e}")
+        db.rollback()
+        return False
+
+
 def record_payment(db: Session, user_id: str, reference: str, amount: int, metadata: Dict, raw_payload: Dict | None = None):
     """
     Record a successful payment in the database.
@@ -201,6 +361,7 @@ def record_payment(db: Session, user_id: str, reference: str, amount: int, metad
         reference: Payment reference
         amount: Amount paid (in kobo)
         metadata: Payment metadata
+        raw_payload: Raw webhook payload
     """
     try:
         payment = Payment(
@@ -219,9 +380,15 @@ def record_payment(db: Session, user_id: str, reference: str, amount: int, metad
         db.rollback()
 
 
-def record_waived_payment(db: Session, user_id: str, role: str, reference: str | None = None):
+def record_waived_payment(db: Session, user_id: str, purpose: str = "test", reference: str | None = None):
     """
-    Record a waived (no-charge) payment placeholder while gateway is bypassed.
+    Record a waived (no-charge) payment placeholder for testing.
+    
+    Args:
+        db: Database session
+        user_id: User ID
+        purpose: Purpose of the payment (premium_package, test, etc.)
+        reference: Optional reference
     """
     try:
         payment = Payment(
@@ -229,12 +396,12 @@ def record_waived_payment(db: Session, user_id: str, role: str, reference: str |
             reference=reference or f"waived-{user_id}",
             amount=0,
             status="waived",
-            payment_metadata={"role": role, "note": "waived"},
+            payment_metadata={"purpose": purpose, "note": "waived for testing"},
             raw_webhook=None,
         )
         db.add(payment)
         db.commit()
-        logger.info(f"[payments] Recorded waived payment for user {user_id}, role={role}")
+        logger.info(f"[payments] Recorded waived payment for user {user_id}, purpose={purpose}")
     except Exception as e:
         logger.error(f"[payments] Failed to record waived payment: {e}")
         db.rollback()

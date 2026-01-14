@@ -20,7 +20,9 @@ class User(Base):
     phone = Column(String(50))
     locale = Column(String(10), default="en")
     tier = Column(String(20), default="free", nullable=False)  # free or pro
-    generation_count = Column(String, default="{}", nullable=False)  # JSON: {role_name: count}
+    generation_count = Column(String, default="{}", nullable=False)  # JSON: {doc_type: count}
+    quota_reset_at = Column(DateTime(timezone=True))  # When quota resets (monthly)
+    premium_expires_at = Column(DateTime(timezone=True))  # When premium expires
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

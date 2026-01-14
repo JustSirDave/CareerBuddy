@@ -244,6 +244,16 @@ async def convert_to_pdf(db: Session, user: User, telegram_user_id: str) -> str:
     Returns:
         Marker string to trigger PDF conversion and sending
     """
+    # Check if user has PDF permission
+    if not payments.can_use_pdf(user):
+        return (f"🔒 *PDF Format is a Premium Feature*\n\n"
+                f"Upgrade to Premium to unlock:\n"
+                f"• Unlimited PDF conversions\n"
+                f"• 2 Resume + 2 CV per month\n"
+                f"• 1 Cover Letter\n"
+                f"• All premium features\n\n"
+                f"Type */upgrade* for just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month!")
+    
     # Return marker with telegram_user_id for send_pdf_to_user
     return f"__SEND_PDF__|{telegram_user_id}|placeholder"
 
@@ -359,11 +369,17 @@ def maybe_finalize(db: Session, job: Job) -> bool:
 
 
 async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free") -> str:
+    # Check quota reset and premium expiry FIRST
+    user = db.query(User).filter(User.id == job.user_id).first()
+    payments.check_and_reset_quota(db, user)
+    payments.check_premium_expiry(db, user)
+    db.refresh(user)  # Refresh to get updated values
+    
     answers = job.answers or resume_flow.start_context()
     step = FORCE_LOWER(answers.get("_step") or "basics")
     t = (text or "").strip()
     t_lower = t.lower()
-    logger.info(f"[resume] step={step} text='{t[:80]}' tier={user_tier}")
+    logger.info(f"[resume] step={step} text='{t[:80]}' tier={user.tier}")
 
     # ---- BASICS ----
     if step == "basics":
@@ -456,7 +472,7 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
             return ("❌ *Invalid format!*\n\n"
                     "Please use: *Degree, School, Year*\n\n"
                     "*Example:* B.Sc. Computer Science, University of Lagos, 2020")
-        
+
         edus = list(answers.get("education", []))
         edus.append(parsed)
         answers["education"] = edus
@@ -537,17 +553,17 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
                 target_role = answers.get("target_role", "")
                 experiences = answers.get("experiences", [])
                 basics = answers.get("basics", {})
-                
+
                 # Generate 5-8 skill suggestions
                 suggested_skills = ai.generate_skills(target_role, basics, experiences, tier=user_tier)
                 suggested_skills = suggested_skills[:8]  # Limit to 8
-                
+
                 # Store in answers
                 answers["ai_suggested_skills"] = suggested_skills
                 job.answers = answers
                 flag_modified(job, "answers")
                 db.commit()
-                
+
                 # Return formatted selection menu
                 return resume_flow.format_skills_selection(suggested_skills)
                 
@@ -590,7 +606,7 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
                 job.answers = answers
                 flag_modified(job, "answers")
                 db.commit()
-                
+
                 return (f"✨ *AI-Generated Professional Summary:*\n\n"
                         f"{summary}\n\n"
                         f"━━━━━━━━━━━━━━━━\n\n"
@@ -618,10 +634,10 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
             return (f"✨ *Your Professional Summary:*\n\n"
                     f"{answers['summary']}\n\n"
                     f"Type *yes* to accept, or send your own summary.")
-        
+
         # Move to preview/review
-        _advance(db, job, answers, "preview")
-        preview_text = _format_preview(answers)
+            _advance(db, job, answers, "preview")
+            preview_text = _format_preview(answers)
         return f"{preview_text}\n\n✅ Reply *yes* to generate your document or */reset* to start over!"
 
     # ---- PERSONAL INFO (BEFORE SUMMARY) ----
@@ -658,9 +674,9 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
             else:
                 # Free users get default template 1
                 answers["template"] = "template_1"
-                _advance(db, job, answers, "finalize")
-                step = "finalize"
-                # Fall through to finalization
+            _advance(db, job, answers, "finalize")
+            step = "finalize"
+            # Fall through to finalization
         else:
             # User wants to make changes
             return ("To make changes, please type */reset* to start over.\n\n"
@@ -756,28 +772,30 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
 
         # Check generation limits before proceeding
         user = db.query(User).filter(User.id == job.user_id).first()
-        target_role = answers.get("target_role", "Unknown Role")
+        doc_type = "cv" if job.type == "cv" else "resume"
 
-        can_gen, reason = payments.can_generate(user, target_role)
+        can_gen, reason = payments.can_generate_document(user, doc_type)
 
         if not can_gen:
-            # Allow paid users to bypass free-tier limit
-            if reason == "free_limit_reached" and answers.get("paid_generation"):
-                can_gen = True
-            elif reason == "free_limit_reached":
-                # Set step to payment_required so user can't skip
-                _advance(db, job, answers, "payment_required")
-                # Return payment marker to trigger payment UI
-                return f"__PAYMENT_REQUIRED__|{target_role}|{payments.PAID_GENERATION_PRICE}"
-            elif reason.startswith("max_per_role"):
-                _, role_name = reason.split("|")
-                return (f"⚠️ *Maximum generations reached for '{role_name}'*\n\n"
-                        f"You've already created {payments.MAX_GENERATIONS_PER_ROLE} documents for this role. "
-                        "To prevent duplication, we limit generations per role.\n\n"
-                        "Please type */reset* to create a document for a different role.")
+            if reason.startswith("quota_exceeded"):
+                _, doc_name, limit = reason.split("|")
+                
+                # Show upgrade message
+                return (f"📊 *{doc_name.upper()} Quota Reached*\n\n"
+                        f"You've used all {limit} {doc_name}{'s' if int(limit) > 1 else ''} in your {user.tier} plan.\n\n"
+                        f"💡 *Upgrade to Premium for:*\n"
+                        f"• More documents (2 Resume + 2 CV)\n"
+                        f"• 1 Cover Letter\n"
+                        f"• PDF format\n"
+                        f"• All features unlocked\n\n"
+                        f"Type */upgrade* to get Premium for just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month!")
+            
+            elif reason.startswith("document_not_allowed"):
+                return (f"❌ *This document type requires Premium*\n\n"
+                        f"Type */upgrade* to unlock all document types!")
 
         # Track the generation
-        payments.update_generation_count(db, user, target_role)
+        payments.update_document_count(db, user, doc_type)
 
         # Note: AI enhancement already applied during flow (skills and summary generation)
         logger.info(f"[handle_resume] Finalizing job.id={job.id}")
@@ -827,10 +845,16 @@ async def handle_revamp(db: Session, job: Job, text: str, user_tier: str = "free
     Handle resume/CV revamp flow.
     User uploads their existing resume file (DOCX/PDF) and AI improves it.
     """
+    # Check quota reset and premium expiry FIRST
+    user = db.query(User).filter(User.id == job.user_id).first()
+    payments.check_and_reset_quota(db, user)
+    payments.check_premium_expiry(db, user)
+    db.refresh(user)  # Refresh to get updated values
+    
     answers = job.answers or {"_step": "upload"}
     step = FORCE_LOWER(answers.get("_step") or "upload")
     t = (text or "").strip()
-    logger.info(f"[revamp] step={step} text_len={len(t)} tier={user_tier}")
+    logger.info(f"[revamp] step={step} text_len={len(t)} tier={user.tier}")
 
     # ---- UPLOAD ----
     if step == "upload":
@@ -896,24 +920,25 @@ Reply *yes* to generate your improved document, or */reset* to start over."""
         if t.lower() in {"yes", "y", "confirm", "ok"}:
             # Check generation limits
             user = db.query(User).filter(User.id == job.user_id).first()
-            target_role = answers.get("target_role", "Revamp")
-
-            can_gen, reason = payments.can_generate(user, target_role)
+            can_gen, reason = payments.can_generate_document(user, "revamp")
             if not can_gen:
-                if reason == "free_limit_reached" and answers.get("paid_generation"):
-                    can_gen = True
-                elif reason == "free_limit_reached":
-                    _advance(db, job, answers, "payment_required")
-                    return (f"🎯 *You've reached your free tier limit ({payments.FREE_TIER_LIMIT} documents)*\n\n"
-                            f"Each additional document costs ₦{payments.PAID_GENERATION_PRICE:,}.\n\n"
-                            "Reply *pay* to get your payment link, or */reset* to cancel.")
-                elif reason.startswith("max_per_role"):
-                    _, role_name = reason.split("|")
-                    return (f"⚠️ *Maximum generations reached for '{role_name}'*\n\n"
-                            "Please */reset* to try a different role.")
+                if reason.startswith("quota_exceeded"):
+                    _, doc_name, limit = reason.split("|")
+                    
+                    return (f"📊 *Revamp Quota Reached*\n\n"
+                            f"You've used all {limit} revamp{'s' if int(limit) > 1 else ''} in your {user.tier} plan.\n\n"
+                            f"💡 *Upgrade to Premium for:*\n"
+                            f"• More documents\n"
+                            f"• PDF format\n"
+                            f"• All features unlocked\n\n"
+                            f"Type */upgrade* to get Premium for just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month!")
+                
+                elif reason.startswith("document_not_allowed"):
+                    return (f"❌ *Revamp requires Premium*\n\n"
+                            f"Type */upgrade* to unlock all features!")
 
             # Track generation
-            payments.update_generation_count(db, user, target_role)
+            payments.update_document_count(db, user, "revamp")
 
             try:
                 # Render revamped document
@@ -1007,10 +1032,16 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
            current_role -> achievement_1 -> achievement_2 -> key_skills -> 
            company_goal -> preview -> finalize
     """
+    # Check quota reset and premium expiry FIRST
+    user = db.query(User).filter(User.id == job.user_id).first()
+    payments.check_and_reset_quota(db, user)
+    payments.check_premium_expiry(db, user)
+    db.refresh(user)  # Refresh to get updated values
+    
     answers = job.answers or {"_step": "basics"}
     step = FORCE_LOWER(answers.get("_step") or "basics")
     t = (text or "").strip()
-    logger.info(f"[cover] step={step} text_len={len(t)} tier={user_tier}")
+    logger.info(f"[cover] step={step} text_len={len(t)} tier={user.tier}")
 
     # BASICS
     if step == "basics":
@@ -1125,23 +1156,26 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
     if step == "preview":
         if t.lower() in {"yes", "y", "confirm", "ok"}:
             user = db.query(User).filter(User.id == job.user_id).first()
-            target_role = answers.get("cover_role", "Cover Letter")
-
-            can_gen, reason = payments.can_generate(user, target_role)
+            can_gen, reason = payments.can_generate_document(user, "cover_letter")
             if not can_gen:
-                if reason == "free_limit_reached" and answers.get("paid_generation"):
-                    can_gen = True
-                elif reason == "free_limit_reached":
-                    _advance(db, job, answers, "payment_required")
-                    return (f"🎯 *You've reached your free tier limit ({payments.FREE_TIER_LIMIT} documents)*\n\n"
-                            f"Each additional document costs ₦{payments.PAID_GENERATION_PRICE:,}.\n\n"
-                            "Reply *pay* to get your payment link, or */reset* to cancel.")
-                elif reason.startswith("max_per_role"):
-                    _, role_name = reason.split("|")
-                    return (f"⚠️ *Maximum generations reached for '{role_name}'*\n\n"
-                            "Please */reset* to try a different role.")
+                if reason.startswith("quota_exceeded"):
+                    return (f"📊 *Cover Letter Quota Reached*\n\n"
+                            f"You've used all cover letters in your {user.tier} plan.\n\n"
+                            f"💡 *Upgrade to Premium for:*\n"
+                            f"• 1 Cover Letter per month\n"
+                            f"• More documents\n"
+                            f"• PDF format\n\n"
+                            f"Type */upgrade* to get Premium for just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month!")
+                
+                elif reason.startswith("document_not_allowed"):
+                    return (f"❌ *Cover Letters require Premium*\n\n"
+                            f"Upgrade to Premium and get:\n"
+                            f"• 1 Cover Letter per month\n"
+                            f"• 2 Resume + 2 CV\n"
+                            f"• PDF format\n\n"
+                            f"Type */upgrade* for just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month!")
 
-            payments.update_generation_count(db, user, target_role)
+            payments.update_document_count(db, user, "cover_letter")
 
             try:
                 logger.info(f"[cover] Rendering cover letter for job.id={job.id}")
@@ -1324,31 +1358,59 @@ async def handle_upgrade_command(db: Session, user: User) -> str:
     """Handle /upgrade command - shows upgrade info with test bypass."""
     from app.services import payments
     
+    # Check quota status
+    quota_status = payments.get_quota_status(user)
+    
     # Check if already premium
     if user.tier == "pro":
-        return """✅ *You're Already Premium!*
+        # Show remaining quota
+        expires = quota_status.get("premium_expires_at", "Unknown")
+        resets = quota_status.get("quota_resets_at", "Unknown")
+        
+        return f"""✅ *You're Already Premium!*
 
-You have full access to all premium features:
-• 🎨 Multiple professional templates
-• 📄 Unlimited PDF conversions
-• 🚀 Priority AI enhancements
-• 💼 All document types
+📊 *Current Quota:*
+• Resume: {quota_status['resume']['remaining']}/{quota_status['resume']['limit']} remaining
+• CV: {quota_status['cv']['remaining']}/{quota_status['cv']['limit']} remaining
+• Cover Letter: {quota_status['cover_letter']['remaining']}/{quota_status['cover_letter']['limit']} remaining
+• Revamp: {quota_status['revamp']['remaining']}/{quota_status['revamp']['limit']} remaining
 
-Type /status to see your current plan."""
-    
-    # Premium tier pricing
-    PREMIUM_PRICE = 7500  # ₦7,500 for lifetime premium access
+⏰ *Quota resets:* {resets[:10] if resets != "Unknown" else "Soon"}
+⭐ *Premium expires:* {expires[:10] if expires != "Unknown" else "Soon"}
+
+Type /status for full details."""
     
     # For testing - no real payment gateway
-    return f"""⭐ *Upgrade to Premium*
+    return f"""⭐ *Upgrade to Premium - ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month*
 
-Unlock all premium features:
-• 🎨 *3 Professional Templates* - Choose from Classic, Modern, or Executive styles
-• 📄 *Unlimited PDF Conversions* - Convert and download as many times as you need
-• 🚀 *Priority AI Enhancements* - Better content generation
-• 💼 *All Document Types* - Resume, CV, Cover Letters, Revamps
+🎯 *What You Get:*
+• 📄 *2 Resumes* per month
+• 📄 *2 CVs* per month
+• 💼 *1 Cover Letter* per month
+• ✨ *1 Revamp* per month
+• 🎨 *3 Professional Templates*
+• 📱 *PDF Format* (instant conversion)
+• 🚀 *Priority AI Enhancements*
 
-*Price:* ₦{PREMIUM_PRICE:,} (one-time payment)
+📊 *Compare Plans:*
+
+*FREE:*
+• 1 Resume/month
+• 1 CV/month
+• 1 Revamp/month
+• DOCX only
+• ❌ No cover letters
+
+*PREMIUM:*
+• 2 Resumes/month
+• 2 CVs/month
+• 1 Cover Letter/month
+• 1 Revamp/month
+• PDF + DOCX formats
+
+💳 *Monthly Subscription:* ₦{payments.PREMIUM_PACKAGE_PRICE:,}
+✅ *Auto-renews* every 30 days
+📅 *Quota resets* monthly
 
 *🧪 TEST MODE - To upgrade, simply type:* `payment made`
 
@@ -1599,43 +1661,53 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
     # 1.7) Status command
     if t_lower in STATUS_COMMANDS:
         logger.info(f"[handle_inbound] Processing /status command for user {telegram_user_id}")
-        import json
-        try:
-            if user.generation_count:
-                generation_counts = json.loads(user.generation_count) if isinstance(user.generation_count, str) else user.generation_count
-            else:
-                generation_counts = {}
-        except Exception as e:
-            logger.error(f"[handle_inbound] Error parsing generation_count: {e}")
-            generation_counts = {}
-        total_generated = sum(generation_counts.values())
+        
+        # Get quota status
+        quota_status = payments.get_quota_status(user)
         
         status_msg = f"""📊 *Your Account Status*
 
 👤 User: {user.name or user.telegram_username or 'User'}
-🎯 Plan: {'Free' if user.tier == 'free' else 'Premium'}
-📄 Documents Created: {total_generated}
+🎯 Plan: {'Premium ⭐' if user.tier == 'pro' else 'Free'}
 
-"""
-        if user.tier == "free":
-            remaining = max(0, 2 - total_generated)
-            status_msg += f"""*Free Plan:*
-✅ {remaining} free document{'s' if remaining != 1 else ''} remaining
-💡 After that: ₦7,500 per document
+📦 *Monthly Quota:*
+📄 Resume: {quota_status['resume']['used']}/{quota_status['resume']['limit']} used ({quota_status['resume']['remaining']} remaining)
+📄 CV: {quota_status['cv']['used']}/{quota_status['cv']['limit']} used ({quota_status['cv']['remaining']} remaining)
+💼 Cover Letter: {quota_status['cover_letter']['used']}/{quota_status['cover_letter']['limit']} used ({quota_status['cover_letter']['remaining']} remaining)
+✨ Revamp: {quota_status['revamp']['used']}/{quota_status['revamp']['limit']} used ({quota_status['revamp']['remaining']} remaining)
 
-"""
-        else:
-            status_msg += """*Premium Plan:*
-✅ Enhanced AI features
-✅ Priority support
-💰 ₦7,500 per document
+📱 PDF Format: {'✅ Enabled' if quota_status['pdf_allowed'] else '❌ Upgrade Required'}
 
 """
         
-        if generation_counts:
-            status_msg += "*Generation History:*\n"
-            for role, count in generation_counts.items():
-                status_msg += f"• {role}: {count} document{'s' if count != 1 else ''}\n"
+        # Show reset/expiry dates
+        if quota_status.get('quota_resets_at'):
+            from datetime import datetime
+            try:
+                reset_date = datetime.fromisoformat(quota_status['quota_resets_at'])
+                status_msg += f"⏰ Quota resets: {reset_date.strftime('%B %d, %Y')}\n"
+            except:
+                pass
+        
+        if user.tier == 'pro' and quota_status.get('premium_expires_at'):
+            from datetime import datetime
+            try:
+                expires_date = datetime.fromisoformat(quota_status['premium_expires_at'])
+                status_msg += f"⭐ Premium expires: {expires_date.strftime('%B %d, %Y')}\n"
+            except:
+                pass
+        
+        if user.tier == "free":
+            status_msg += f"""
+💡 *Upgrade to Premium?*
+For just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month, get:
+• 2 Resumes + 2 CVs
+• 1 Cover Letter
+• PDF format
+• All premium features
+
+Type */upgrade* to get started!
+"""
         
         status_msg += "\nReady to create? Type /start!"
         return status_msg
@@ -1684,35 +1756,44 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         
         # Check if already premium
         if user.tier == "pro":
-            return """✅ You're already a Premium user!
-            
-Type /status to see your premium features."""
+            quota_status = payments.get_quota_status(user)
+            return f"""✅ You're already a Premium user!
+
+📊 *Current Quota:*
+• Resume: {quota_status['resume']['remaining']}/{quota_status['resume']['limit']} remaining
+• CV: {quota_status['cv']['remaining']}/{quota_status['cv']['limit']} remaining
+• Cover Letter: {quota_status['cover_letter']['remaining']}/{quota_status['cover_letter']['limit']} remaining
+• Revamp: {quota_status['revamp']['remaining']}/{quota_status['revamp']['limit']} remaining
+
+Type /status for full details."""
         
-        # Upgrade user to premium
-        user.tier = "pro"
-        logger.info(f"[handle_inbound] Setting user {user.id} tier to 'pro'")
+        # Upgrade user to premium using the new system
+        success = payments.upgrade_to_premium(db, user)
         
-        # Commit the tier change FIRST to ensure it's persisted
-        db.commit()
-        db.refresh(user)  # Refresh to ensure we have the committed state
-        logger.info(f"[handle_inbound] User {user.id} tier change committed. Current tier: {user.tier}")
+        if not success:
+            return "❌ Sorry, there was an error upgrading your account. Please try again or contact support."
         
-        # Record a waived payment for tracking (in separate transaction)
-        try:
-            from app.services import payments
-            payments.record_waived_payment(db, user.id, "test_bypass", reference=f"test-{telegram_user_id}")
-        except Exception as e:
-            logger.error(f"[handle_inbound] Failed to record waived payment (tier already upgraded): {e}")
+        # Record waived payment for tracking
+        payments.record_waived_payment(db, user.id, "premium_package", reference=f"test-{telegram_user_id}")
         
-        return """🎉 *Payment Confirmed - You're Now Premium!*
+        # Refresh user to get updated tier
+        db.refresh(user)
+        logger.info(f"[handle_inbound] User {user.id} upgraded to premium via bypass")
+        
+        return f"""🎉 *Welcome to Premium!*
 
 ✅ Account upgraded successfully
 
-You now have access to:
-• 🎨 Multiple professional templates
-• 📄 Unlimited PDF conversions
-• 🚀 Priority AI enhancements
-• 💼 All document types (Resume, CV, Cover Letter, Revamp)
+📦 *Your Monthly Package:*
+• 📄 2 Resumes
+• 📄 2 CVs
+• 💼 1 Cover Letter
+• ✨ 1 Revamp
+• 📱 PDF Format (unlimited conversions)
+• 🎨 3 Professional Templates
+
+⏰ *Renews:* Monthly (auto-reset)
+💳 *Price:* ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month
 
 *🚀 Ready to create?*
 Type /start to see the menu, then choose:
