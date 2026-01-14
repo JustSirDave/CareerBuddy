@@ -9,14 +9,14 @@ CareerBuddy is an intelligent agent that helps users create ATS-compliant profes
 ### Key Features
 
 -  **Conversational Interface** - Natural conversation flow via Telegram
--  **AI-Enhanced Content** - Claude AI improves summaries and bullet points
+-  **AI-Enhanced Content** - OpenAI GPT-4 generates summaries and skills
 -  **ATS-Compliant** - Documents follow applicant tracking system best practices
 -  **Multi-Document Support** - Resume, CV, and cover letter generation
 -  **Smart Parsing** - Handles comma-separated input for quick data entry
--  **Auto-Generation** - AI drafts professional summaries if user skips
+-  **Auto-Generation** - AI drafts professional summaries and suggests skills
 -  **Multi-Experience Support** - Add multiple work experiences and education
 -  **Deduplication** - Prevents double-processing of messages
--  **Premium Tier** - One-time payment (₦5,000) for unlimited features
+-  **Premium Tier** - One-time payment (₦7,500) for unlimited features
 -  **PDF Export** - Direct PDF generation with pixel-perfect layouts
 -  **Multiple Templates** - 3 professional templates (Classic, Modern, Executive)
 
@@ -25,22 +25,16 @@ CareerBuddy is an intelligent agent that helps users create ATS-compliant profes
 ### Backend
 - **FastAPI** - Modern async Python web framework
 - **PostgreSQL 16** - Primary database
-- **Redis 7** - Caching and message broker
-- **SQLAlchemy 2.0** - ORM with async support
-- **Alembic** - Database migrations
-- **Celery 5.4** - Background task queue
+- **Redis 7** - Caching and idempotency
+- **SQLAlchemy 2.0** - ORM with migrations (Alembic)
 
 ### Document Generation
 - **python-docx** - DOCX file generation
 - **ReportLab** - Direct PDF generation (all templates)
-- **LibreOffice** - Fallback DOCX to PDF conversion
-- **Jinja2** - Template engine
+- **LibreOffice** - DOCX to PDF conversion for user-edited files
 
 ### AI/LLM
-- **Anthropic Claude** - Content enhancement and generation
-
-### Storage
-- **boto3** - S3/Cloudflare R2 integration
+- **OpenAI GPT-4** - Skills generation and content enhancement
 
 ### External APIs
 - **Telegram Bot API** - Official Telegram bot interface
@@ -55,7 +49,7 @@ CareerBuddy is an intelligent agent that helps users create ATS-compliant profes
 
 - Docker & Docker Compose
 - Telegram Bot Token (get from @BotFather on Telegram)
-- Anthropic API key (optional, for AI features)
+- OpenAI API key (optional, for AI features)
 
 ### 1. Environment Setup
 
@@ -77,22 +71,14 @@ DATABASE_URL=postgresql://postgres:postgres@postgres:5432/buddy
 # Redis
 REDIS_URL=redis://redis:6379/0
 
-# AI/LLM (Optional)
-ANTHROPIC_API_KEY=your_anthropic_key_here
+# AI/LLM (Optional - for skills/summary generation)
 OPENAI_API_KEY=your_openai_key_here
 
 # Payments (Paystack - Optional)
 PAYSTACK_SECRET=your_paystack_secret_here
 
-# Admin (Optional)
+# Admin (Optional - comma-separated Telegram user IDs)
 ADMIN_TELEGRAM_IDS=123456789,987654321
-
-# Storage (S3 - Optional, files saved locally by default)
-S3_ENDPOINT=
-S3_REGION=
-S3_BUCKET=
-S3_ACCESS_KEY_ID=
-S3_SECRET_ACCESS_KEY=
 ```
 
 ### 2. Start Services
@@ -194,11 +180,11 @@ Bot: ⚙️ Generating PDF... [PDF sent]
 
 ## Premium Features
 
-Upgrade to Premium for ₦5,000 (one-time payment):
+Upgrade to Premium for ₦7,500 (one-time payment):
 
 -  **Multiple Templates** - Choose from 3 professional styles
 -  **Unlimited PDF Conversions** - Export as PDF anytime
--  **Priority AI Enhancements** - Better content generation
+-  **Enhanced AI Generation** - Better skills and summary generation
 -  **All Document Types** - Resumes, CVs, and Cover Letters
 
 Type `/upgrade` in the bot to get started!
@@ -216,17 +202,25 @@ Telegram ↔ FastAPI → AI Enhancement → Document Renderer → Storage
 - **Users** - Telegram user data (telegram_user_id, username, tier)
 - **Jobs** - Document creation sessions
 - **Messages** - Conversation history
-- **Files** - Generated document metadata
 - **Payments** - Transaction records (Paystack integration)
 
 ## Development
 
 ```bash
 cd backend
-pip install python-docx reportlab anthropic boto3 alembic
 
-# Run locally
-uvicorn app.main:app --reload
+# Install dependencies
+poetry install
+
+# Run locally (with hot reload)
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+# Run tests
+pytest
+
+# Format code
+black app/
+isort app/
 ```
 
 ## Project Status

@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.services.idempotency import seen_or_mark
 from app.db import get_db
+from app.models.user import User
+from app.models.job import Job
 from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request, send_template_selection
 from app.services.router import handle_inbound
 
@@ -30,6 +32,32 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
     if "callback_query" in payload:
         return await handle_callback_query(payload["callback_query"], db)
 
+    # Check for document uploads FIRST (before text extraction)
+    message = payload.get("message", {})
+    document = message.get("document")
+    supported_mimes = [
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
+        "application/msword",  # .doc (old Word)
+        "application/pdf"  # .pdf
+    ]
+    if document and document.get("mime_type") in supported_mimes:
+        # Extract chat info for document upload
+        chat = message.get("chat", {})
+        chat_id = chat.get("id")
+        from_user = message.get("from", {})
+        username = from_user.get("username")
+        msg_id = message.get("message_id")
+        
+        # Deduplication for document uploads
+        if msg_id and seen_or_mark(str(msg_id)):
+            logger.warning(f"[telegram_webhook] Duplicate document upload msg_id={msg_id}, skipping")
+            return {"ok": True}
+        
+        if chat_id:
+            # User uploaded a document - route to appropriate handler
+            await handle_document_upload(chat_id, document, db, username)
+            return {"ok": True}
+
     # Extract message from Telegram update
     chat_id, text, msg_id, username = extract_telegram_message(payload)
     if not chat_id:
@@ -39,14 +67,6 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
     # EARLY DEDUPLICATION: Check BEFORE calling handle_inbound
     if msg_id and seen_or_mark(str(msg_id)):
         logger.warning(f"[telegram_webhook] Duplicate msg_id={msg_id} from chat_id={chat_id}, skipping")
-        return {"ok": True}
-
-    # Check if message contains a document (for edited .docx uploads)
-    message = payload.get("message", {})
-    document = message.get("document")
-    if document and document.get("mime_type") in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/msword"]:
-        # User uploaded a .docx file - store it for PDF conversion
-        await handle_document_upload(chat_id, document, db)
         return {"ok": True}
 
     # Show typing indicator while processing
@@ -121,26 +141,68 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
     return {"ok": True}
 
 
-async def handle_document_upload(chat_id: int | str, document: dict, db: Session):
+async def handle_document_upload(chat_id: int | str, document: dict, db: Session, username: str | None = None):
     """
-    Handle uploaded .docx document from user for PDF conversion.
+    Handle uploaded document from user.
+    Routes to either:
+    - Revamp processing (if user has active revamp job)
+    - PDF conversion storage (for edited documents)
 
     Args:
         chat_id: Telegram chat ID
         document: Telegram document object
         db: Database session
+        username: Telegram username
     """
     try:
         import httpx
+        from pathlib import Path
         from app.config import settings
-        from app.models import User
+        from app.models import User, Job
+        from app.services import document_parser
+
+        # Get user
+        user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
+        if not user:
+            await reply_text(chat_id, "❌ User not found. Please type /start to begin.")
+            return
 
         # Get file info
         file_id = document.get("file_id")
-        file_name = document.get("file_name", "edited_document.docx")
+        file_name = document.get("file_name", "document")
+        mime_type = document.get("mime_type", "")
+        file_size = document.get("file_size", 0)
+
+        logger.info(f"[handle_document_upload] User {user.id} uploaded: {file_name} ({mime_type}, {file_size} bytes)")
+
+        # Check if user has an active revamp job
+        revamp_job = db.query(Job).filter(
+            Job.user_id == user.id,
+            Job.type == "revamp",
+            Job.status == "collecting"
+        ).order_by(Job.created_at.desc()).first()
+
+        # Validate file format
+        is_valid, file_type, error_msg = document_parser.validate_file_format(
+            file_name, mime_type, user.tier
+        )
+
+        if not is_valid:
+            await reply_text(chat_id, error_msg)
+            return
+
+        # Check file size (max 10MB)
+        max_size = 10 * 1024 * 1024  # 10MB in bytes
+        if file_size > max_size:
+            await reply_text(chat_id, 
+                           f"❌ *File too large!*\n\n"
+                           f"File size: {file_size / (1024*1024):.1f}MB\n"
+                           f"Maximum: 10MB\n\n"
+                           f"Please upload a smaller file.")
+            return
 
         # Download file from Telegram
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             # Get file path
             file_info_resp = await client.get(
                 f"https://api.telegram.org/bot{settings.telegram_bot_token}/getFile",
@@ -161,26 +223,97 @@ async def handle_document_upload(chat_id: int | str, document: dict, db: Session
             file_bytes = file_resp.content
 
         # Save the uploaded document
-        from pathlib import Path
-        user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
-        if user:
-            upload_dir = Path("output") / "uploads" / str(user.id)
-            upload_dir.mkdir(parents=True, exist_ok=True)
+        upload_dir = Path("output") / "uploads" / str(user.id)
+        upload_dir.mkdir(parents=True, exist_ok=True)
 
-            upload_path = upload_dir / file_name
-            upload_path.write_bytes(file_bytes)
+        upload_path = upload_dir / file_name
+        upload_path.write_bytes(file_bytes)
 
-            logger.info(f"[handle_document_upload] Saved uploaded document: {upload_path}")
+        logger.info(f"[handle_document_upload] Saved: {upload_path}")
 
+        # Route based on context
+        if revamp_job:
+            # REVAMP FLOW: Process the uploaded resume
+            await handle_revamp_upload(chat_id, upload_path, file_type, revamp_job, db, user)
+        else:
+            # PDF CONVERSION FLOW: Store for later conversion
             await reply_text(chat_id, 
-                            f"✅ *Document Received!*\n\n"
-                            f"📄 File: {file_name}\n\n"
-                            f"Ready to convert to PDF?\n"
-                            f"Type */pdf* or *convert to pdf* to get your final PDF!")
+                           f"✅ *Document Received!*\n\n"
+                           f"📄 File: {file_name}\n\n"
+                           f"Ready to convert to PDF?\n"
+                           f"Type */pdf* or *convert to pdf* to get your final PDF!")
 
     except Exception as e:
         logger.error(f"[handle_document_upload] Error: {e}")
         await reply_text(chat_id, "❌ Sorry, there was an error processing your document. Please try again.")
+
+
+async def handle_revamp_upload(chat_id: int | str, file_path: Path, file_type: str, job: Job, db: Session, user: User):
+    """
+    Process uploaded resume for revamp feature.
+
+    Args:
+        chat_id: Telegram chat ID
+        file_path: Path to uploaded file
+        file_type: File type (docx, pdf)
+        job: Active revamp job
+        db: Database session
+        user: User object
+    """
+    try:
+        from app.services import document_parser, router
+        from sqlalchemy.orm.attributes import flag_modified
+
+        # Show processing message
+        await reply_text(chat_id, 
+                       f"⏳ *Analyzing your resume...*\n\n"
+                       f"📄 Extracting content from {file_type.upper()} file\n"
+                       f"🤖 This may take 30-60 seconds\n\n"
+                       f"_Please wait..._")
+
+        # Parse the document
+        parsed_data = document_parser.parse_document(file_path, file_type)
+
+        logger.info(f"[handle_revamp_upload] Parsed {file_path.name}: "
+                   f"{parsed_data['word_count']} words, "
+                   f"{len(parsed_data['sections'])} sections")
+
+        # Store parsed content in job
+        answers = job.answers if isinstance(job.answers, dict) else {}
+        answers["original_content"] = parsed_data["content"]
+        answers["file_type"] = file_type
+        answers["file_name"] = parsed_data["file_name"]
+        answers["word_count"] = parsed_data["word_count"]
+        answers["sections_detected"] = list(parsed_data["sections"].keys())
+        answers["_step"] = "revamp_processing"
+
+        job.answers = answers
+        flag_modified(job, "answers")
+        db.commit()
+
+        logger.info(f"[handle_revamp_upload] Stored content in job.id={job.id}, advancing to processing")
+
+        # Trigger revamp processing through router
+        reply = await router.handle_revamp(db, job, "", user_tier=user.tier)
+
+        if reply:
+            await reply_text(chat_id, reply)
+
+    except ValueError as ve:
+        # Validation error (e.g., empty document)
+        logger.warning(f"[handle_revamp_upload] Validation error: {ve}")
+        await reply_text(chat_id, f"❌ *Document Error*\n\n{str(ve)}")
+
+    except Exception as e:
+        logger.error(f"[handle_revamp_upload] Error processing revamp upload: {e}")
+        await reply_text(chat_id, 
+                       f"❌ *Processing Error*\n\n"
+                       f"Sorry, we couldn't process your resume.\n\n"
+                       f"Please try:\n"
+                       f"• Uploading a different file\n"
+                       f"• Saving your resume in .docx format\n"
+                       f"• Typing /reset to start over\n\n"
+                       f"_Error: {str(e)}_")
 
 
 async def send_document_to_user(chat_id: int | str, job_id: str, filename: str):

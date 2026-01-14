@@ -6,7 +6,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.models import User, Job, Message
 from app.flows import resume as resume_flow
 from app.services.idempotency import seen_or_mark
-from app.services import orchestrator, renderer, storage, ai, payments
+from app.services import renderer, storage, ai, payments
 
 WELCOME = """👋 *Welcome to Career Buddy!*
 
@@ -69,7 +69,7 @@ I help you create professional resumes, CVs, and cover letters tailored to your 
 *📝 Available Documents:*
 • *Resume* - 1-2 page professional resume
 • *CV* - Detailed curriculum vitae
-• *Revamp* - Improve your existing resume/CV
+• *Revamp* - Coming Soon!
 • *Cover Letter* - Premium feature
 
 *🎯 How It Works:*
@@ -309,16 +309,22 @@ def _active_collecting_job(db: Session, user_id):
 
 
 def _new_job(db: Session, user_id, doc_type: str) -> Job:
+    # Set initial step based on doc type
+    if doc_type == "revamp":
+        initial_step = "upload"
+    else:
+        initial_step = "basics"
+    
     job = Job(
         user_id=user_id,
         type=doc_type,
         status="collecting",
-        answers=resume_flow.start_context() | {"_step": "basics"},
+        answers=resume_flow.start_context() | {"_step": initial_step},
     )
     db.add(job)
     db.commit()
     db.refresh(job)
-    logger.info(f"[new_job] Created job.id={job.id} type={doc_type}")
+    logger.info(f"[new_job] Created job.id={job.id} type={doc_type} initial_step={initial_step}")
     return job
 
 
@@ -769,14 +775,8 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         # Track the generation
         payments.update_generation_count(db, user, target_role)
 
-        # Enhance content with AI
-        logger.info(f"[handle_resume] Finalizing job.id={job.id}, enhancing content...")
-        try:
-            enhanced_answers = orchestrator.batch_enhance_content(answers)
-            job.answers = enhanced_answers
-            flag_modified(job, "answers")
-        except Exception as e:
-            logger.error(f"[handle_resume] AI enhancement failed: {e}, continuing with original")
+        # Note: AI enhancement already applied during flow (skills and summary generation)
+        logger.info(f"[handle_resume] Finalizing job.id={job.id}")
 
         # Render document
         try:
@@ -821,7 +821,7 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
 async def handle_revamp(db: Session, job: Job, text: str, user_tier: str = "free") -> str:
     """
     Handle resume/CV revamp flow.
-    User pastes their existing resume and AI improves it.
+    User uploads their existing resume file (DOCX/PDF) and AI improves it.
     """
     answers = job.answers or {"_step": "upload"}
     step = FORCE_LOWER(answers.get("_step") or "upload")
@@ -830,25 +830,36 @@ async def handle_revamp(db: Session, job: Job, text: str, user_tier: str = "free
 
     # ---- UPLOAD ----
     if step == "upload":
-        if not t:
-            return ("📄 *Resume/CV Revamp*\n\n"
-                    "I'll help improve your existing resume or CV with AI-powered enhancements.\n\n"
-                    "Please paste your resume content here (or type the main sections).\n\n"
-                    "_Tip: Include your contact info, experience, skills, and education._")
+        # Show upload instructions
+        if not t or t.lower() in {"revamp", "revamp existing", "revamp existing (soon)"}:
+            upload_msg = "📄 *Resume/CV Revamp*\n\n"
+            upload_msg += "I'll help improve your existing resume or CV with AI-powered enhancements!\n\n"
+            upload_msg += "*📤 Upload Your Resume:*\n"
+            
+            if user_tier == "pro":
+                upload_msg += "✅ Supported formats: .docx, .pdf\n"
+            else:
+                upload_msg += "✅ Supported format: .docx\n"
+                upload_msg += "💡 Upgrade to Premium for PDF support\n"
+            
+            upload_msg += "\n*How It Works:*\n"
+            upload_msg += "1. Tap the 📎 attachment icon\n"
+            upload_msg += "2. Select your resume file\n"
+            upload_msg += "3. Send it to me\n"
+            upload_msg += "4. I'll analyze and improve it with AI\n"
+            upload_msg += "5. You'll get a professionally revamped version!\n\n"
+            upload_msg += "_Maximum file size: 10MB_"
+            
+            return upload_msg
 
-        # User has pasted content
-        if len(t) < 100:
-            return ("That seems quite short for a resume. Please paste more content including:\n"
-                    "• Contact information\n"
-                    "• Work experience\n"
-                    "• Skills\n"
-                    "• Education")
-
-        # Store original content
-        answers["original_content"] = t
-        _advance(db, job, answers, "revamp_processing")
-
-        return "✅ Got it! Analyzing your resume with AI... (This may take a few seconds)"
+        # User sent text instead of uploading
+        return ("📎 *Please upload your resume file*\n\n"
+                "I need you to upload your existing resume as a file (not paste text).\n\n"
+                "*Steps:*\n"
+                "1. Tap the 📎 attachment button\n"
+                "2. Choose your resume file (.docx format)\n"
+                "3. Send it to me\n\n"
+                "Or type */reset* to cancel.")
 
     # ---- REVAMP PROCESSING ----
     if step == "revamp_processing":
@@ -922,8 +933,39 @@ Reply *yes* to generate your improved document, or */reset* to start over."""
 
     # ---- PAYMENT REQUIRED (REVAMP) ----
     if step == "payment_required":
+        # Check if user is now premium (may have upgraded since reaching this step)
+        user = db.query(User).filter(User.id == job.user_id).first()
+        
+        if user and user.tier == "pro":
+            # User is premium now - bypass payment and proceed to generation
+            logger.info(f"[revamp] User {user.id} is premium, bypassing payment for revamp")
+            answers.pop("payment_reference", None)
+            answers["paid_generation"] = True
+            
+            # Track generation
+            target_role = answers.get("target_role", "Revamp")
+            payments.update_generation_count(db, user, target_role)
+            
+            try:
+                # Render revamped document
+                logger.info(f"[revamp] Rendering revamped document for job.id={job.id}")
+                doc_bytes = renderer.render_revamp(job)
+                filename = _generate_filename(job)
+                file_path = storage.save_file_locally(job.id, doc_bytes, filename)
+
+                job.draft_text = file_path
+                job.status = "preview_ready"
+                db.commit()
+
+                _advance(db, job, answers, "done")
+                return f"__SEND_DOCUMENT__|{job.id}|{filename}"
+            except Exception as e:
+                logger.error(f"[revamp] Rendering failed: {e}")
+                _advance(db, job, answers, "done")
+                return f"❌ Sorry, document generation failed: {str(e)}"
+        
+        # User is still free tier - handle payment
         if t.lower() == "pay":
-            user = db.query(User).filter(User.id == job.user_id).first()
             target_role = answers.get("target_role", "Revamp")
 
             payment_result = await payments.create_payment_link(user, target_role)
@@ -943,7 +985,6 @@ Reply *yes* to generate your improved document, or */reset* to start over."""
 
         if t.lower() == "paid":
             # Waive payment for now
-            user = db.query(User).filter(User.id == job.user_id).first()
             payments.record_waived_payment(db, user.id, answers.get("target_role", "Revamp"))
 
             answers.pop("payment_reference", None)
@@ -1120,8 +1161,38 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
 
     # PAYMENT REQUIRED
     if step == "payment_required":
+        # Check if user is now premium (may have upgraded since reaching this step)
+        user = db.query(User).filter(User.id == job.user_id).first()
+        
+        if user and user.tier == "pro":
+            # User is premium now - bypass payment and proceed to generation
+            logger.info(f"[cover] User {user.id} is premium, bypassing payment for cover letter")
+            answers.pop("payment_reference", None)
+            answers["paid_generation"] = True
+            
+            # Track generation
+            target_role = answers.get("cover_role", "Cover Letter")
+            payments.update_generation_count(db, user, target_role)
+            
+            try:
+                logger.info(f"[cover] Rendering cover letter for job.id={job.id}")
+                doc_bytes = renderer.render_cover_letter(job)
+                filename = _generate_filename(job)
+                file_path = storage.save_file_locally(job.id, doc_bytes, filename)
+
+                job.draft_text = file_path
+                job.status = "preview_ready"
+                db.commit()
+
+                _advance(db, job, answers, "done")
+                return f"__SEND_DOCUMENT__|{job.id}|{filename}"
+            except Exception as e:
+                logger.error(f"[cover] Rendering failed: {e}")
+                _advance(db, job, answers, "done")
+                return f"❌ Sorry, cover letter generation failed: {str(e)}"
+        
+        # User is still free tier - handle payment
         if t.lower() == "pay":
-            user = db.query(User).filter(User.id == job.user_id).first()
             target_role = answers.get("cover_role", "Cover Letter")
 
             payment_result = await payments.create_payment_link(user, target_role)
@@ -1141,7 +1212,6 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
 
         if t.lower() == "paid":
             # Waive payment for now
-            user = db.query(User).filter(User.id == job.user_id).first()
             payments.record_waived_payment(db, user.id, answers.get("cover_role", "Cover Letter"))
 
             answers.pop("payment_reference", None)
@@ -1704,6 +1774,17 @@ Or simply type what you want to create!"""
     
     if doc_type == "cover" and user.tier != "free":
         logger.info(f"[handle_inbound] Allowing premium user {user.id} (tier={user.tier}) to access cover letter")
+    
+    # Block revamp feature - Coming Soon
+    if doc_type == "revamp":
+        logger.info(f"[handle_inbound] Blocking revamp feature for user {user.id} - coming soon")
+        return ("✨ *Revamp Feature - Coming Soon!*\n\n"
+                "We're working on an exciting new feature to revamp and enhance your existing resumes!\n\n"
+                "In the meantime, you can:\n"
+                "• 📄 Create a new Resume\n"
+                "• 📋 Generate a CV\n"
+                "• 📝 Write a Cover Letter\n\n"
+                "Type /start to see all available options!")
 
     job = get_active_job(db, user.id, doc_type)
     _log_state("after get_active_job", job)

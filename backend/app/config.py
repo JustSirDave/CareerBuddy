@@ -15,7 +15,10 @@ class Settings(BaseModel):
 
     # Telegram Bot
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    admin_telegram_ids: list[str] = os.getenv("ADMIN_TELEGRAM_IDS", "").split(",") if os.getenv("ADMIN_TELEGRAM_IDS") else []
+    admin_telegram_ids: list[str] = [
+        id.strip() for id in os.getenv("ADMIN_TELEGRAM_IDS", "").split(",")
+        if id.strip()
+    ]
 
     # Database
     database_url: str = os.getenv(
@@ -27,18 +30,10 @@ class Settings(BaseModel):
     redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
     # AI/LLM
-    anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
 
-    # Payments (Phase 5)
+    # Payments
     paystack_secret: str = os.getenv("PAYSTACK_SECRET", "")
-
-    # Storage (Phase 4)
-    s3_endpoint: str = os.getenv("S3_ENDPOINT", "")
-    s3_region: str = os.getenv("S3_REGION", "")
-    s3_bucket: str = os.getenv("S3_BUCKET", "")
-    s3_access_key_id: str = os.getenv("S3_ACCESS_KEY_ID", "")
-    s3_secret_access_key: str = os.getenv("S3_SECRET_ACCESS_KEY", "")
 
 
 settings = Settings()

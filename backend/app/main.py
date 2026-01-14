@@ -5,7 +5,6 @@ from pathlib import Path
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 from loguru import logger
 from sqlalchemy import text
 
@@ -30,7 +29,8 @@ class RequestLogMiddleware(BaseHTTPMiddleware):
         return response
 
 
-async def check_env():
+@app.on_event("startup")
+async def startup_event():
     """Check required environment variables on startup"""
     required = [
         ("TELEGRAM_BOT_TOKEN", settings.telegram_bot_token),

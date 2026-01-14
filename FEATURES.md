@@ -23,11 +23,13 @@
 - **Payment Integration**: Free tier users see upgrade prompt
 - **Professional Formatting**: Clean, employer-ready layout
 
-### ✅ Priority 3: Revamp Feature (COMPLETED)
-- **Upload Support**: Users paste existing resume content
-- **AI Enhancement**: GPT-4 analyzes and improves content
+### 🔜 Priority 3: Revamp Feature (PENDING - Coming Soon)
+- **Upload Support**: Users will upload existing resume files (.docx for free, .docx + .pdf for premium)
+- **AI Enhancement**: GPT-4 will analyze and improve content
 - **Preview**: Shows AI-improved version before generating
 - **Professional Output**: Formatted document with improvements highlighted
+- **Smart Parsing**: Extracts content from DOCX and PDF files
+- **Status**: Feature implemented but temporarily disabled for production release
 
 ### ✅ Priority 4: Multiple Templates (COMPLETED)
 
@@ -117,7 +119,7 @@
 - ✅ **Skill Suggestions**: GPT-4 generates 5-8 relevant skills
 - ✅ **Professional Summary**: AI drafts based on experience and traits
 - ✅ **Content Enhancement**: Improves bullet points and descriptions
-- ✅ **Resume Revamp**: Analyzes and improves existing content
+- 🔜 **Resume Revamp**: Coming soon - Upload existing resume for AI analysis and improvement
 
 #### User Experience
 - ✅ **Inline Keyboards**: Interactive buttons for choices
@@ -141,7 +143,7 @@
 1. **Resume** (1-2 pages, focused)
 2. **CV** (Comprehensive, academic)
 3. **Cover Letter** (Tailored to job)
-4. **Revamp** (Improve existing)
+4. **Revamp** (Coming Soon)
 
 ### Templates
 1. **Classic Professional** (Default)

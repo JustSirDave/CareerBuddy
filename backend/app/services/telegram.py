@@ -133,7 +133,7 @@ Choose what you'd like to create:"""
                 {"text": "📋 CV", "callback_data": "doc_cv"}
             ],
             [
-                {"text": "✨ Revamp Existing", "callback_data": "doc_revamp"}
+                {"text": "✨ Revamp Existing (Soon)", "callback_data": "doc_revamp"}
             ],
             [
                 {"text": "📝 Cover Letter", "callback_data": "doc_cover"}
