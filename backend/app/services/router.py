@@ -1665,6 +1665,31 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         # Get quota status
         quota_status = payments.get_quota_status(user)
         
+        # Special status for admin users
+        if quota_status['tier'] == 'admin':
+            status_msg = f"""👑 *Admin Account Status*
+
+👤 User: {user.name or user.telegram_username or 'Admin'}
+🎯 Plan: **ADMIN** (Unlimited Access)
+
+📦 *Quota:*
+📄 Resume: ∞ (Unlimited)
+📄 CV: ∞ (Unlimited)
+💼 Cover Letter: ∞ (Unlimited)
+✨ Revamp: ∞ (Unlimited)
+
+📱 PDF Format: ✅ Enabled (Unlimited)
+
+🚀 *Admin Privileges:*
+• Unlimited document generation
+• All document types unlocked
+• PDF conversion always available
+• No quota restrictions
+• No expiry date
+
+Ready to create? Type /start!"""
+            return status_msg
+        
         status_msg = f"""📊 *Your Account Status*
 
 👤 User: {user.name or user.telegram_username or 'User'}

@@ -14,6 +14,19 @@ from app.config import settings
 from app.models import User, Payment
 
 
+def _is_admin(user: User) -> bool:
+    """
+    Check if user is an admin.
+    
+    Args:
+        user: User model
+        
+    Returns:
+        True if user is admin, False otherwise
+    """
+    return user.telegram_user_id in settings.admin_telegram_ids
+
+
 # Document type definitions
 DocumentType = Literal["resume", "cv", "cover_letter", "revamp"]
 
@@ -75,6 +88,10 @@ def check_and_reset_quota(db: Session, user: User) -> bool:
     Returns:
         True if quota was reset, False otherwise
     """
+    # Admin users don't need quota resets
+    if _is_admin(user):
+        return False
+    
     now = datetime.utcnow()
     
     # Initialize quota_reset_at if not set
@@ -107,6 +124,10 @@ def check_premium_expiry(db: Session, user: User) -> bool:
     Returns:
         True if user was downgraded, False otherwise
     """
+    # Admin users never get downgraded
+    if _is_admin(user):
+        return False
+    
     now = datetime.utcnow()
     
     # If user is pro but premium has expired
@@ -130,6 +151,10 @@ def can_generate_document(user: User, doc_type: DocumentType) -> Tuple[bool, str
     Returns:
         Tuple of (can_generate: bool, reason: str)
     """
+    # Admin users have unlimited access
+    if _is_admin(user):
+        return True, ""
+    
     # Get current counts
     counts = get_document_counts(user)
     current_count = counts.get(doc_type, 0)
@@ -159,6 +184,10 @@ def can_use_pdf(user: User) -> bool:
     Returns:
         True if PDF is allowed, False otherwise
     """
+    # Admin users can always use PDF
+    if _is_admin(user):
+        return True
+    
     tier_limits = QUOTA_LIMITS.get(user.tier, QUOTA_LIMITS["free"])
     return tier_limits.get("pdf_allowed", False)
 
@@ -172,6 +201,11 @@ def update_document_count(db: Session, user: User, doc_type: DocumentType):
         user: User model
         doc_type: Document type
     """
+    # Don't track quota for admin users
+    if _is_admin(user):
+        logger.info(f"[payments] Admin user {user.id} - quota tracking skipped")
+        return
+    
     counts = get_document_counts(user)
     counts[doc_type] = counts.get(doc_type, 0) + 1
     user.generation_count = json.dumps(counts)
@@ -189,6 +223,35 @@ def get_quota_status(user: User) -> Dict[str, any]:
     Returns:
         Dict with quota information
     """
+    # Admin users have unlimited quota
+    if _is_admin(user):
+        return {
+            "tier": "admin",
+            "resume": {
+                "used": 0,
+                "limit": "∞",
+                "remaining": "∞"
+            },
+            "cv": {
+                "used": 0,
+                "limit": "∞",
+                "remaining": "∞"
+            },
+            "cover_letter": {
+                "used": 0,
+                "limit": "∞",
+                "remaining": "∞"
+            },
+            "revamp": {
+                "used": 0,
+                "limit": "∞",
+                "remaining": "∞"
+            },
+            "pdf_allowed": True,
+            "quota_resets_at": None,
+            "premium_expires_at": None,
+        }
+    
     counts = get_document_counts(user)
     tier_limits = QUOTA_LIMITS.get(user.tier, QUOTA_LIMITS["free"])
     
