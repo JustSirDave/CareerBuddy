@@ -544,15 +544,27 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
 
     # ---- SKILLS (AI-GENERATED WITH NUMBER SELECTION) ----
     if step == "skills":
+        # Wake words for skills generation
+        SKILLS_WAKE_WORDS = {"continue", "ready", "show", "generate", "next", "proceed", "go"}
+        
         # Check if AI skills were already generated
         ai_skills = answers.get("ai_suggested_skills", [])
         
         if not ai_skills:
+            # If user sent a wake word but skills not generated yet, show waiting message
+            if t_lower in SKILLS_WAKE_WORDS:
+                return ("⏳ *Generating skill suggestions...*\n\n"
+                        "AI is analyzing your role and experience to suggest relevant skills.\n"
+                        "This usually takes 3-5 seconds.\n\n"
+                        "Type *continue* when ready to see them!")
+            
             # Generate AI skills on first entry
             try:
                 target_role = answers.get("target_role", "")
                 experiences = answers.get("experiences", [])
                 basics = answers.get("basics", {})
+                
+                logger.info(f"[skills] Starting AI skills generation for job {job.id}")
 
                 # Generate 5-8 skill suggestions
                 suggested_skills = ai.generate_skills(target_role, basics, experiences, tier=user_tier)
@@ -563,6 +575,8 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
                 job.answers = answers
                 flag_modified(job, "answers")
                 db.commit()
+                
+                logger.info(f"[skills] AI skills generated successfully for job {job.id}")
 
                 # Return formatted selection menu
                 return resume_flow.format_skills_selection(suggested_skills)
@@ -575,8 +589,8 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
                         "*Example:* Python, Data Analysis, SQL, Communication")
         
         # User is selecting from AI skills
-        if not t:
-            # Show the skills again
+        if not t or t_lower in SKILLS_WAKE_WORDS:
+            # Show the skills again (wake words trigger re-display)
             return resume_flow.format_skills_selection(ai_skills)
         
         # Parse user selection (numbers or custom skills)
@@ -597,27 +611,52 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
 
     # ---- SUMMARY (AI-GENERATED, REQUIRED) ----
     if step == "summary":
+        # Wake words to trigger showing already-generated summary
+        WAKE_WORDS = {"continue", "ready", "show", "generate", "next", "proceed", "go", "ok"}
+        
         # Check if summary was already generated
         if not answers.get("summary"):
+            # If user sent a wake word but summary not generated yet, show waiting message
+            if t_lower in WAKE_WORDS:
+                return ("⏳ *Generating your professional summary...*\n\n"
+                        "Please wait a moment while AI crafts your summary.\n"
+                        "This usually takes 3-5 seconds.\n\n"
+                        "Type *continue* when you're ready to see it!")
+            
             # Generate AI summary
             try:
+                # Show generating message first (this gets sent immediately)
+                logger.info(f"[summary] Starting AI summary generation for job {job.id}")
+                
                 summary = ai.generate_summary(answers, tier=user_tier)
                 answers["summary"] = summary
                 job.answers = answers
                 flag_modified(job, "answers")
                 db.commit()
+                
+                logger.info(f"[summary] AI summary generated successfully for job {job.id}")
 
                 return (f"✨ *AI-Generated Professional Summary:*\n\n"
                         f"{summary}\n\n"
                         f"━━━━━━━━━━━━━━━━\n\n"
                         f"✅ Happy with this? Type *yes* to continue.\n"
-                        f"Or send your own summary to replace it.")
+                        f"📝 Or send your own summary to replace it.\n"
+                        f"🔄 Type *continue* to see it again.")
                 
             except Exception as e:
                 logger.error(f"[summary] AI generation failed: {e}")
                 return ("⚠️ AI summary generation unavailable.\n\n"
                         "Please write a 2-3 sentence professional summary:\n\n"
                         "*Example:* Data Analyst with 5+ years building dashboards.")
+        
+        # Summary already exists - check for wake words
+        if t_lower in WAKE_WORDS and not t_lower in {"yes", "y", "ok", "okay", "good", "done"}:
+            # Show the already-generated summary
+            return (f"✨ *Your AI-Generated Professional Summary:*\n\n"
+                    f"{answers['summary']}\n\n"
+                    f"━━━━━━━━━━━━━━━━\n\n"
+                    f"✅ Happy with this? Type *yes* to continue.\n"
+                    f"📝 Or send your own summary to replace it.")
         
         # User can edit the summary or accept it
         if t_lower in {"yes", "y", "ok", "okay", "good", "done"}:
@@ -630,10 +669,12 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
             flag_modified(job, "answers")
             db.commit()
         else:
-            # Show the generated summary again
+            # No input - show the generated summary again
             return (f"✨ *Your Professional Summary:*\n\n"
                     f"{answers['summary']}\n\n"
-                    f"Type *yes* to accept, or send your own summary.")
+                    f"━━━━━━━━━━━━━━━━\n\n"
+                    f"Type *yes* to accept, or send your own summary.\n"
+                    f"Or type *continue* to see it again.")
 
         # Move to preview/review
             _advance(db, job, answers, "preview")
