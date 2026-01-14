@@ -8,7 +8,7 @@
 - **ReportLab Integration**: Direct PDF generation for all templates using ReportLab
 - **LibreOffice Fallback**: Available for user-edited documents
 - **Conversion Command**: Users can type `/pdf` or "convert to pdf" to convert documents
-- **Premium Feature**: PDF conversion requires premium tier (₦5,000 one-time)
+- **Premium Feature**: PDF conversion requires premium tier (₦7,500/month)
 - **Workflow**: 
   1. User generates `.docx` document
   2. User can edit the `.docx` (optional)
@@ -62,24 +62,48 @@
 
 ### ✅ Priority 5: Payment Integration (COMPLETED)
 - **Paystack API**: Full integration with Nigerian payment gateway
-- **Free Tier**: 2 free documents per user
-- **Premium Tier**: ₦5,000 one-time payment for lifetime premium access
-- **Pay-Per-Generation**: ₦7,500 per document after free tier (non-premium users)
+- **Monthly Quota System**: Document-type-based tracking with automatic monthly reset
+- **Free Tier** (Resets monthly):
+  - 1 Resume per month
+  - 1 CV per month
+  - 1 Revamp per month
+  - DOCX only (no PDF)
+  - No Cover Letters
+- **Premium Tier** (₦7,500/month):
+  - 2 Resumes per month
+  - 2 CVs per month
+  - 1 Cover Letter per month
+  - 1 Revamp per month
+  - PDF + DOCX format
+  - Auto-renewal every 30 days
 - **Payment Flow**:
-  1. User reaches free tier limit or wants premium features
+  1. User reaches quota limit or wants premium features
   2. Bot generates Paystack payment link
   3. User pays securely via Paystack
   4. Webhook confirms payment
-  5. Bot automatically upgrades user or unlocks generation
+  5. Bot automatically upgrades user
 - **Webhook Handler**: `/webhooks/paystack` endpoint for payment notifications
-- **Premium Benefits**:
-  - Multiple professional templates (3 styles)
-  - Unlimited PDF conversions
-  - Priority AI enhancements
-  - All document types (cover letters)
+- **Automatic Features**:
+  - Monthly quota reset (every 30 days)
+  - Premium expiry and auto-downgrade
+  - Quota status tracking per document type
 - **Database Records**: All payments logged with metadata
+- **Testing**: Payment bypass with "payment made" command
 
 ### ✅ Priority 6: Admin Features (COMPLETED)
+
+#### Admin Unlimited Privileges
+- **Configuration**: Set `ADMIN_TELEGRAM_IDS` in `.env` file
+- **Unlimited Access**:
+  - ∞ Unlimited document generation (all types)
+  - No quota tracking or restrictions
+  - PDF always enabled
+  - Never expires or resets
+  - All premium features unlocked
+- **Special Status Display**: `/status` shows "ADMIN (Unlimited Access)"
+- **Bypass All Limits**: Admin bypasses all quota checks, resets, and expiry
+- **Testing & Development**: Perfect for testing all features without restrictions
+- **Multiple Admins**: Supports comma-separated list of admin Telegram IDs
 
 #### `/admin` Command
 - Shows admin dashboard with system statistics
@@ -101,6 +125,16 @@
 - **Purpose**: Test document generation without going through full flow
 - **Template Support**: Optional template number (e.g., `/sample resume 2`)
 - **Pre-filled Data**: Uses `sample_resume_data.json` for quick testing
+
+#### `/makeadmin` Command
+- **Usage**: `/makeadmin <telegram_user_id>`
+- **Functionality**: Manually upgrade a user to premium tier
+- **Permissions**: Admin-only
+
+#### `/setpro` Command
+- **Usage**: `/setpro <telegram_user_id>`
+- **Functionality**: Set a user to premium tier
+- **Permissions**: Admin-only
 
 ### ✅ Additional Features
 

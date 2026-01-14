@@ -26,6 +26,14 @@ Complete redesign of the payment and quota system from role-based tracking to do
 - ✅ Resets monthly
 - Auto-renews every 30 days
 
+### **Admin Tier** (Unlimited)
+- **∞ Unlimited** documents (all types)
+- **No quota tracking** - Admin generations not counted
+- **No quota resets** - Infinite quota never resets
+- **PDF always enabled**
+- **Never expires** - Permanent unlimited access
+- **Configuration**: Set `ADMIN_TELEGRAM_IDS` in `.env` file
+
 ### **Coming Soon**
 - Pay-per-document feature
 
@@ -172,19 +180,37 @@ Bot: 🔒 PDF Format is a Premium Feature
 
 ## 🔧 Automated Processes
 
+### Admin Bypass
+All quota-related functions check for admin status first:
+1. `_is_admin(user)` checks if user's Telegram ID is in `ADMIN_TELEGRAM_IDS`
+2. If admin, all quota checks return unlimited access
+3. Admin document generations are not tracked
+4. Admin quota never resets (because it's infinite)
+5. Admin never gets downgraded
+
+**Admin privileges include:**
+- `can_generate_document()` - Always returns `True`
+- `can_use_pdf()` - Always returns `True`
+- `update_document_count()` - Skips tracking
+- `check_and_reset_quota()` - Skips reset
+- `check_premium_expiry()` - Skips expiry check
+- `get_quota_status()` - Returns unlimited quota
+
 ### Monthly Quota Reset
 The `check_and_reset_quota(db, user)` function is called at the start of every document generation flow. It:
-1. Checks if 30 days have passed since last reset
-2. Resets all document counts to 0
-3. Sets next reset date to +30 days
-4. Commits changes
+1. **Checks if user is admin** - If yes, skips reset
+2. Checks if 30 days have passed since last reset
+3. Resets all document counts to 0
+4. Sets next reset date to +30 days
+5. Commits changes
 
 ### Premium Expiry Check
 The `check_premium_expiry(db, user)` function is called at the start of every document generation flow. It:
-1. Checks if premium has expired
-2. Downgrades user to "free" tier
-3. User retains any remaining documents from free quota
-4. Logs the downgrade
+1. **Checks if user is admin** - If yes, skips downgrade
+2. Checks if premium has expired
+3. Downgrades user to "free" tier
+4. User retains any remaining documents from free quota
+5. Logs the downgrade
 
 ---
 
@@ -228,12 +254,14 @@ status = payments.get_quota_status(user)
 
 ## 🚨 Important Notes
 
-1. **Monthly Reset is Automatic** - No cron job needed; runs on first request after 30 days
-2. **Premium Expiry is Automatic** - User auto-downgrades to free tier when premium expires
-3. **Quota Tracking is Document-Based** - Each document type has its own quota
-4. **PDF Permission is Tier-Based** - Free users cannot access PDF conversion
-5. **Payment Bypass Works** - Type "payment made" to test premium upgrade
-6. **Old Data is Migrated** - Existing users get fresh quota in new format
+1. **Admin Users Have Unlimited Access** - Users in `ADMIN_TELEGRAM_IDS` bypass all quota checks
+2. **Monthly Reset is Automatic** - No cron job needed; runs on first request after 30 days
+3. **Premium Expiry is Automatic** - User auto-downgrades to free tier when premium expires
+4. **Quota Tracking is Document-Based** - Each document type has its own quota
+5. **PDF Permission is Tier-Based** - Free users cannot access PDF conversion (admin always can)
+6. **Payment Bypass Works** - Type "payment made" to test premium upgrade
+7. **Old Data is Migrated** - Existing users get fresh quota in new format
+8. **Admin Quota Not Tracked** - Admin document generations don't count against any quota
 
 ---
 

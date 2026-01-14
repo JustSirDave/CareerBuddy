@@ -16,9 +16,10 @@ CareerBuddy is an intelligent agent that helps users create ATS-compliant profes
 -  **Auto-Generation** - AI drafts professional summaries and suggests skills
 -  **Multi-Experience Support** - Add multiple work experiences and education
 -  **Deduplication** - Prevents double-processing of messages
--  **Premium Tier** - One-time payment (₦7,500) for unlimited features
+-  **Premium Tier** - Monthly subscription (₦7,500) with auto-renewal and quota system
 -  **PDF Export** - Direct PDF generation with pixel-perfect layouts
 -  **Multiple Templates** - 3 professional templates (Classic, Modern, Executive)
+-  **Admin Privileges** - Unlimited access for testing and development (configured via .env)
 
 ## Tech Stack
 
@@ -77,7 +78,7 @@ OPENAI_API_KEY=your_openai_key_here
 # Payments (Paystack - Optional)
 PAYSTACK_SECRET=your_paystack_secret_here
 
-# Admin (Optional - comma-separated Telegram user IDs)
+# Admin (Optional - comma-separated Telegram user IDs for unlimited access)
 ADMIN_TELEGRAM_IDS=123456789,987654321
 ```
 
@@ -174,20 +175,50 @@ Bot: ⚙️ Generating PDF... [PDF sent]
 - `/start` - Begin or restart
 - `/help` - Show help guide
 - `/status` - Check your account status
-- `/upgrade` - Upgrade to Premium (₦5,000)
+- `/upgrade` - Upgrade to Premium (₦7,500/month)
 - `/pdf` - Convert document to PDF (Premium only)
 - `/reset` - Cancel current job and start over
 
 ## Premium Features
 
-Upgrade to Premium for ₦7,500 (one-time payment):
+Upgrade to Premium for ₦7,500/month:
 
--  **Multiple Templates** - Choose from 3 professional styles
--  **Unlimited PDF Conversions** - Export as PDF anytime
--  **Enhanced AI Generation** - Better skills and summary generation
--  **All Document Types** - Resumes, CVs, and Cover Letters
+### Free Tier
+-  **1 Resume** per month
+-  **1 CV** per month
+-  **1 Revamp** per month
+-  **DOCX format** only
+-  ❌ No Cover Letters
+-  ❌ No PDF conversion
+
+### Premium Tier (₦7,500/month)
+-  **2 Resumes** per month
+-  **2 CVs** per month
+-  **1 Cover Letter** per month
+-  **1 Revamp** per month
+-  **PDF + DOCX** format
+-  **3 Professional Templates**
+-  **Auto-renewal** every 30 days
 
 Type `/upgrade` in the bot to get started!
+
+## Admin Privileges
+
+For testing and development, admin users get **unlimited access** to all features:
+
+-  **∞ Unlimited Documents** - Create as many documents as you want
+-  **All Document Types** - Resume, CV, Cover Letter, Revamp
+-  **PDF Always Enabled** - No restrictions
+-  **No Quota Tracking** - Admin generations not counted
+-  **Never Expires** - Permanent unlimited access
+
+**Setup:**
+1. Get your Telegram User ID from `@userinfobot`
+2. Add to `.env` file: `ADMIN_TELEGRAM_IDS=your_telegram_id`
+3. Restart the bot
+4. Type `/status` to verify admin access
+
+See [ADMIN_PRIVILEGES.md](ADMIN_PRIVILEGES.md) for full details.
 
 ## Architecture
 
