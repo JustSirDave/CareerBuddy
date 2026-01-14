@@ -1,3 +1,7 @@
+"""
+CareerBuddy - Configuration
+Author: Sir Dave
+"""
 import os
 from pydantic import BaseModel
 from dotenv import load_dotenv

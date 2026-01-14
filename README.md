@@ -244,4 +244,11 @@ MIT License
 
 ---
 
+## 👨‍💻 Author
+
+**Sir Dave**  
+GitHub: [@JustSirDave](https://github.com/JustSirDave)
+
+---
+
 **Made for job seekers everywhere**

@@ -1,7 +1,7 @@
-# ============================================================================
-# FILE: backend/app/db.py
-# ============================================================================
-
+"""
+CareerBuddy - Database Configuration
+Author: Sir Dave
+"""
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from contextlib import contextmanager

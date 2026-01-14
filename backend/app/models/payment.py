@@ -1,7 +1,7 @@
-# ============================================================================
-# FILE: backend/app/models/payment.py
-# ============================================================================
-
+"""
+CareerBuddy - Payment Model
+Author: Sir Dave
+"""
 from sqlalchemy import Column, String, DateTime, Integer, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func

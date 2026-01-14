@@ -1,6 +1,7 @@
 """
-Telegram Bot Service for CareerBuddy
+CareerBuddy - Telegram Bot Service
 Handles sending messages and documents via Telegram Bot API
+Author: Sir Dave
 """
 import httpx
 from io import BytesIO

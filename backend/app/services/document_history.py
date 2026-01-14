@@ -1,6 +1,7 @@
 """
-Document history service
+CareerBuddy - Document History Service
 Track and retrieve user's document generation history
+Author: Sir Dave
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import desc

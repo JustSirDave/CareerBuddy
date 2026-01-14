@@ -1,4 +1,8 @@
-# backend/app/routers/webhook.py
+"""
+CareerBuddy - Webhook Router
+Handles Telegram and Paystack webhooks
+Author: Sir Dave
+"""
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException, Depends
 from loguru import logger

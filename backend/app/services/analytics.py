@@ -1,6 +1,8 @@
 """
+CareerBuddy - Analytics Service
 Analytics service for admin dashboard
 Track system-wide statistics and metrics
+Author: Sir Dave
 """
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc

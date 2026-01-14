@@ -2,7 +2,8 @@
 name = "buddyai-backend"
 version = "0.1.0"
 description = "Career Buddy AI — backend"
-authors = ["BuddyAI"]
+authors = ["Sir Dave"]
+maintainers = ["Sir Dave"]
 
 [tool.poetry.dependencies]
 python = "^3.11"

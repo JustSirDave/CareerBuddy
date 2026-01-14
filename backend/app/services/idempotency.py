@@ -1,5 +1,7 @@
 """
-    Simple Redis-based idempotency checker for webhook deduplication.
+CareerBuddy - Idempotency Service
+Simple Redis-based idempotency checker for webhook deduplication.
+Author: Sir Dave
 """
 import redis
 import os

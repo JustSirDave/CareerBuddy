@@ -1,6 +1,7 @@
 """
-File Storage Service
+CareerBuddy - File Storage Service
 Handles local document storage and DOCX to PDF conversion
+Author: Sir Dave
 """
 import os
 import subprocess

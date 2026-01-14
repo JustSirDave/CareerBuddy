@@ -1,3 +1,7 @@
+"""
+CareerBuddy - AI-powered resume, CV, and cover letter generator
+Author: Sir Dave
+"""
 import uuid
 import time
 from pathlib import Path

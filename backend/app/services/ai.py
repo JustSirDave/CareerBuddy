@@ -1,5 +1,7 @@
 """
+CareerBuddy - AI Service
 AI service for generating skills and summaries using OpenAI.
+Author: Sir Dave
 """
 from typing import List, Dict
 from loguru import logger

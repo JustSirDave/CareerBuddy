@@ -1,5 +1,7 @@
 """
+CareerBuddy - Document Renderer (DOCX)
 Document rendering service - Generate professional DOCX and PDF files
+Author: Sir Dave
 """
 from io import BytesIO
 from typing import Dict, List

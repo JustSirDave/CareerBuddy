@@ -1,5 +1,7 @@
 """
+CareerBuddy - Rate Limiting Middleware
 Rate limiting middleware to prevent abuse
+Author: Sir Dave
 """
 from fastapi import Request, HTTPException, status
 from fastapi.responses import JSONResponse

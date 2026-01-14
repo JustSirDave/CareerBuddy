@@ -1,6 +1,8 @@
 """
+CareerBuddy - PDF Renderer (ReportLab)
 PDF rendering service - Generate PDFs directly from data using ReportLab
 This bypasses DOCX->PDF conversion issues with LibreOffice
+Author: Sir Dave
 """
 from io import BytesIO
 from typing import Dict, List

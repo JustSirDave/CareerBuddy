@@ -1,5 +1,7 @@
 """
+CareerBuddy - Payment Service
 Payment and generation limit management service.
+Author: Sir Dave
 """
 import json
 import httpx

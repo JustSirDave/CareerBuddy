@@ -1,6 +1,7 @@
 """
-Error monitoring and logging service
+CareerBuddy - Error Monitoring Service
 Tracks errors, exceptions, and critical events
+Author: Sir Dave
 """
 from loguru import logger
 from datetime import datetime

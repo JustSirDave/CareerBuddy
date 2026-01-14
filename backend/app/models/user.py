@@ -1,7 +1,7 @@
-# ============================================================================
-# FILE: backend/app/models/user.py
-# ============================================================================
-
+"""
+CareerBuddy - User Model
+Author: Sir Dave
+"""
 from sqlalchemy import Column, String, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func

@@ -1,4 +1,7 @@
-
+"""
+CareerBuddy - Job Model
+Author: Sir Dave
+"""
 from sqlalchemy import Column, String, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func

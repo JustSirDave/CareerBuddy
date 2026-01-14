@@ -1,6 +1,7 @@
 """
-Document Parser Service
+CareerBuddy - Document Parser Service
 Extracts content from uploaded resume files (DOCX, PDF)
+Author: Sir Dave
 """
 from pathlib import Path
 from typing import Dict, Optional
