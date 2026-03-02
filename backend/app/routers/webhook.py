@@ -13,7 +13,7 @@ from app.services.idempotency import seen_or_mark
 from app.db import get_db
 from app.models.user import User
 from app.models.job import Job
-from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request, send_template_selection
+from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request, send_template_selection, send_onboarding_continue_menu
 from app.services.router import handle_inbound
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -63,7 +63,7 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
             return {"ok": True}
 
     # Extract message from Telegram update
-    chat_id, text, msg_id, username = extract_telegram_message(payload)
+    chat_id, text, msg_id, username, first_name = extract_telegram_message(payload)
     if not chat_id:
         logger.debug("[telegram_webhook] No valid message found, ignoring")
         return {"ok": True}
@@ -77,15 +77,20 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
     await send_typing_action(chat_id)
 
     # Process the message (using str(chat_id) as user identifier)
-    reply = await handle_inbound(db, str(chat_id), text or "", msg_id=str(msg_id), telegram_username=username)
+    reply = await handle_inbound(db, str(chat_id), text or "", msg_id=str(msg_id), telegram_username=username, first_name=first_name)
 
     if reply == "__SHOW_MENU__":
         await send_choice_menu(chat_id)
         return {"ok": True}
 
-    # Check if document type menu should be shown (with confirmation message)
+    if reply and reply.startswith("__SHOW_ONBOARDING_CONTINUE_MENU__|"):
+        parts = reply.split("|", 1)
+        if len(parts) == 2:
+            await send_onboarding_continue_menu(chat_id, parts[1])
+        return {"ok": True}
+
     if reply and reply.startswith("__SHOW_DOCUMENT_MENU__|"):
-        parts = reply.split("|")
+        parts = reply.split("|", 2)
         if len(parts) >= 2:
             tier = parts[1]
             # If there's a confirmation message, send it first
@@ -565,6 +570,23 @@ async def handle_callback_query(callback_query: dict, db):
             if reply:
                 await reply_text(chat_id, reply)
 
+        elif data == "onboarding_continue":
+            first_name = (from_user.get("first_name") or "").strip() or "there"
+            reply = await handle_inbound(db, str(chat_id), "continue", telegram_username=username, first_name=first_name)
+            if reply:
+                await reply_text(chat_id, reply)
+
+        elif data == "onboarding_start_fresh":
+            from app.models import Job, User
+            user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
+            tier = user.tier if user else "free"
+            if user:
+                j = db.query(Job).filter(Job.user_id == user.id, Job.status == "collecting").order_by(Job.created_at.desc()).first()
+                if j:
+                    j.status = "closed"
+                    db.commit()
+            await send_document_type_menu(chat_id, tier)
+
         elif data == "learn_more":
             # Show more info about the service
             info_msg = """📚 *About Career Buddy*
@@ -652,7 +674,7 @@ _This may take a few moments._""")
         return {"ok": False, "error": str(e)}
 
 
-def extract_telegram_message(payload: dict) -> tuple[int | None, str | None, int | None, str | None]:
+def extract_telegram_message(payload: dict) -> tuple[int | None, str | None, int | None, str | None, str]:
     """
     Extract message data from Telegram webhook payload.
 
@@ -682,56 +704,43 @@ def extract_telegram_message(payload: dict) -> tuple[int | None, str | None, int
         payload: Telegram webhook payload
 
     Returns:
-        Tuple of (chat_id, text, msg_id, username)
+        Tuple of (chat_id, text, msg_id, username, first_name)
     """
     try:
         # Check if it's a message update
         message = payload.get("message")
 
         if not message:
-            # Could be edited_message, callback_query, etc.
             logger.debug(f"[telegram_webhook] Non-message update type, ignoring")
-            return None, None, None, None
+            return None, None, None, None, "there"
 
-        # Extract chat ID
         chat = message.get("chat", {})
         chat_id = chat.get("id")
-
         if not chat_id:
             logger.debug("[telegram_webhook] No chat_id found")
-            return None, None, None, None
-
-        # Only process private chats (ignore groups)
+            return None, None, None, None, "there"
         if chat.get("type") != "private":
             logger.debug(f"[telegram_webhook] Ignoring non-private chat: {chat.get('type')}")
-            return None, None, None, None
+            return None, None, None, None, "there"
 
-        # Extract message ID
         msg_id = message.get("message_id")
-
-        # Extract username
         from_user = message.get("from", {})
         username = from_user.get("username")
+        first_name = (from_user.get("first_name") or "").strip() or "there"
 
-        # Extract message text
         text = message.get("text")
-
-        # Handle commands (convert to lowercase for consistency)
         if text and text.startswith("/"):
-            # Keep commands like /start, /reset
             pass
-
-        # Ignore messages without text (media, stickers, etc. for now)
         if not text:
             logger.debug("[telegram_webhook] Message without text, ignoring")
-            return None, None, None, None
+            return None, None, None, None, "there"
 
-        return chat_id, text, msg_id, username
+        return chat_id, text, msg_id, username, first_name
 
     except Exception as e:
         logger.error(f"[telegram_webhook] Failed to extract message from Telegram payload: {e}")
         logger.error(f"[telegram_webhook] Payload was: {payload}")
-        return None, None, None, None
+        return None, None, None, None, "there"
 
 
 @router.post("/paystack")

@@ -114,22 +114,22 @@ curl http://localhost:8000/health
    TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
    ```
 
-3. **Set Webhook:**
+3. **Make the bot live (choose one):**
+
+   **Option A – Automatic (recommended):** Set `PUBLIC_URL` to a public URL and restart. The app registers the webhook on startup.
    ```bash
-   curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
-     -H "Content-Type: application/json" \
-     -d '{"url": "https://your-public-domain.com/webhooks/telegram"}'
-   ```
-   
-   For local development with ngrok:
-   ```bash
-   # Install ngrok and run
+   # For local dev with ngrok:
    ngrok http 8000
-   
-   # Use the ngrok URL for webhook
+   # Copy the https URL (e.g. https://abc123.ngrok-free.app), then in .env:
+   PUBLIC_URL=https://abc123.ngrok-free.app
+   # Restart: docker-compose restart api
+   ```
+
+   **Option B – Manual:** Set the webhook yourself:
+   ```bash
    curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
      -H "Content-Type: application/json" \
-     -d '{"url": "https://your-ngrok-url.ngrok.io/webhooks/telegram"}'
+     -d '{"url": "https://your-public-url/webhooks/telegram"}'
    ```
 
 4. **Verify Webhook:**

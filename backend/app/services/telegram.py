@@ -109,6 +109,27 @@ _Need help? Use /help command_"""
         return {"error": str(e)}
 
 
+async def send_onboarding_continue_menu(chat_id: int | str, message: str):
+    """Send message with Continue / Start Fresh buttons for returning users with active job."""
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    keyboard = {
+        "inline_keyboard": [
+            [{"text": "▶️ Continue", "callback_data": "onboarding_continue"}],
+            [{"text": "🔄 Start Fresh", "callback_data": "onboarding_start_fresh"}]
+        ]
+    }
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown", "reply_markup": keyboard}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload)
+            if r.status_code >= 400:
+                logger.error(f"Telegram send onboarding menu failed: {r.status_code} {r.text}")
+            return r.json() if r.content else {}
+    except Exception as e:
+        logger.error(f"Telegram send onboarding menu exception: {e}")
+        return {"error": str(e)}
+
+
 async def send_document_type_menu(chat_id: int | str, user_tier: str = "free"):
     """
     Send document type selection menu with inline keyboard.

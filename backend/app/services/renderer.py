@@ -572,7 +572,7 @@ def _render_template_2(answers: dict) -> bytes:
     - Calibri font, refined spacing
     """
     doc = Document()
-    
+
     # Set margins to match template 1
     sections = doc.sections
     for section in sections:
@@ -580,7 +580,7 @@ def _render_template_2(answers: dict) -> bytes:
         section.bottom_margin = Inches(0.5)
         section.left_margin = Inches(0.5)
         section.right_margin = Inches(0.5)
-    
+
     # Get data
     basics = answers.get('basics', {})
     summary = answers.get('summary', '')
@@ -590,7 +590,7 @@ def _render_template_2(answers: dict) -> bytes:
     profiles = answers.get('profiles', [])
     certifications = answers.get('certifications', [])
     projects = answers.get('projects', [])
-    
+
     # ==================== HEADER ====================
     # Name (centered, large, dark blue)
     name = basics.get('name', 'Your Name')
@@ -621,7 +621,7 @@ def _render_template_2(answers: dict) -> bytes:
         contact_parts.append(basics['phone'])
     if basics.get('email'):
         contact_parts.append(basics['email'])
-    
+
     if contact_parts:
         contact_para = doc.add_paragraph()
         contact_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -634,7 +634,7 @@ def _render_template_2(answers: dict) -> bytes:
     # Horizontal line separator
     _add_horizontal_line(doc)
     doc.add_paragraph().paragraph_format.space_after = Pt(12)
-    
+
     # ==================== PROFILES ====================
     if profiles:
         profiles_heading = doc.add_paragraph()
@@ -654,7 +654,7 @@ def _render_template_2(answers: dict) -> bytes:
                     profiles_para.add_run(' | ')
                 _add_hyperlink(profiles_para, url, platform)
         profiles_para.paragraph_format.space_after = Pt(14)
-    
+
     # ==================== SUMMARY ====================
     if summary:
         summary_heading = doc.add_paragraph()
@@ -688,7 +688,7 @@ def _render_template_2(answers: dict) -> bytes:
         for run in skills_para.runs:
             run.font.size = Pt(11)
             run.font.name = 'Calibri'
-    
+
     # ==================== EXPERIENCE ====================
     if experiences:
         exp_heading = doc.add_paragraph()
@@ -739,7 +739,7 @@ def _render_template_2(answers: dict) -> bytes:
                 doc.add_paragraph().paragraph_format.space_after = Pt(8)
         
         doc.add_paragraph().paragraph_format.space_after = Pt(6)
-    
+
     # ==================== EDUCATION ====================
     if education:
         edu_heading = doc.add_paragraph()
@@ -749,7 +749,7 @@ def _render_template_2(answers: dict) -> bytes:
         edu_heading_run.font.name = 'Calibri'
         edu_heading_run.font.color.rgb = RGBColor(0, 51, 102)
         edu_heading.paragraph_format.space_after = Pt(6)
-        
+
         for edu in education:
             institution = edu.get('institution', 'Institution')
             degree = edu.get('degree', '')
@@ -1069,12 +1069,12 @@ def _render_template_3(answers: dict) -> bytes:
                 for run in proj_para.runs:
                     run.font.size = Pt(11)
                     run.font.name = 'Arial'
-    
+
     # Save to bytes
     buffer = BytesIO()
     doc.save(buffer)
     buffer.seek(0)
-    
+
     logger.info("[renderer] Generated resume DOCX with template_3")
     return buffer.getvalue()
 

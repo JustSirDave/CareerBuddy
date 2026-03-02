@@ -6,6 +6,7 @@ import uuid
 import time
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -33,15 +34,53 @@ class RequestLogMiddleware(BaseHTTPMiddleware):
         return response
 
 
+def _is_public_url(url: str) -> bool:
+    """Check if URL is publicly reachable (not localhost)."""
+    if not url or not url.strip():
+        return False
+    lower = url.lower().strip()
+    return not (
+        lower.startswith("http://localhost")
+        or lower.startswith("https://localhost")
+        or "127.0.0.1" in lower
+    )
+
+
+async def _register_telegram_webhook() -> None:
+    """Register webhook with Telegram when PUBLIC_URL is a real public URL."""
+    if not settings.telegram_bot_token:
+        logger.warning("[BOOT] TELEGRAM_BOT_TOKEN missing - skipping webhook registration")
+        return
+    if not _is_public_url(settings.public_url):
+        logger.info(
+            f"[BOOT] PUBLIC_URL is localhost - webhook not set. "
+            "Use ngrok or a public domain and set PUBLIC_URL to enable."
+        )
+        return
+    webhook_url = f"{settings.public_url.rstrip('/')}/webhooks/telegram"
+    api_url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/setWebhook"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(api_url, json={"url": webhook_url})
+            data = r.json()
+        if data.get("ok"):
+            logger.info(f"[BOOT] Telegram webhook set: {webhook_url}")
+        else:
+            logger.warning(f"[BOOT] Telegram webhook failed: {data.get('description', 'unknown')}")
+    except Exception as e:
+        logger.warning(f"[BOOT] Could not set Telegram webhook: {e}")
+
+
 @app.on_event("startup")
 async def startup_event():
-    """Check required environment variables on startup"""
+    """Check required env and register webhook when PUBLIC_URL is public."""
     required = [
         ("TELEGRAM_BOT_TOKEN", settings.telegram_bot_token),
     ]
     missing = [k for k, v in required if not v]
     if missing:
         logger.warning(f"[BOOT] Missing required env: {', '.join(missing)}")
+    await _register_telegram_webhook()
 
 
 @app.get("/health/db")

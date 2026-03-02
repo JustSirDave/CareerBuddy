@@ -2,7 +2,7 @@
 CareerBuddy - User Model
 Author: Sir Dave
 """
-from sqlalchemy import Column, String, DateTime
+from sqlalchemy import Column, String, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db import Base
@@ -23,6 +23,8 @@ class User(Base):
     generation_count = Column(String, default="{}", nullable=False)  # JSON: {doc_type: count}
     quota_reset_at = Column(DateTime(timezone=True))  # When quota resets (monthly)
     premium_expires_at = Column(DateTime(timezone=True))  # When premium expires
+    onboarding_complete = Column(Boolean, default=False, nullable=False)
+    onboarding_step = Column(String(50), nullable=True)  # e.g. "awaiting_intent_response"
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

@@ -9,6 +9,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.models import User, Job, Message
 from app.flows import resume as resume_flow
+from app.flows import onboarding as onboarding_flow
 from app.services.idempotency import seen_or_mark
 from app.services import renderer, storage, ai, payments
 
@@ -614,40 +615,62 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         # Wake words to trigger showing already-generated summary
         WAKE_WORDS = {"continue", "ready", "show", "generate", "next", "proceed", "go", "ok"}
         
+        # Handle skip - user wants to write their own summary
+        if t_lower == "skip":
+            return ("✍️ *Write Your Own Summary*\n\n"
+                    "Please write a 2-3 sentence professional summary about yourself.\n\n"
+                    "*Example:*\n"
+                    "Senior Data Analyst with 5+ years of experience in financial modeling and business intelligence. "
+                    "Proven track record of delivering actionable insights that drive strategic decisions. "
+                    "Expert in Python, SQL, and data visualization tools.")
+        
         # Check if summary was already generated
         if not answers.get("summary"):
-            # If user sent a wake word but summary not generated yet, show waiting message
+            # If user sent a wake word, generate AI summary NOW
             if t_lower in WAKE_WORDS:
-                return ("⏳ *Generating your professional summary...*\n\n"
-                        "Please wait a moment while AI crafts your summary.\n"
-                        "This usually takes 3-5 seconds.\n\n"
-                        "Type *continue* when you're ready to see it!")
-            
-            # Generate AI summary
-            try:
-                # Show generating message first (this gets sent immediately)
-                logger.info(f"[summary] Starting AI summary generation for job {job.id}")
+                logger.info(f"[summary] User triggered AI generation with wake word: {t_lower}")
                 
-                summary = ai.generate_summary(answers, tier=user_tier)
-                answers["summary"] = summary
+                try:
+                    # Generate AI summary immediately
+                    logger.info(f"[summary] Starting AI summary generation for job {job.id}")
+                    
+                    summary = ai.generate_summary(answers, tier=user_tier)
+                    answers["summary"] = summary
+                    job.answers = answers
+                    flag_modified(job, "answers")
+                    db.commit()
+                    
+                    logger.info(f"[summary] AI summary generated successfully for job {job.id}")
+
+                    return (f"✨ *AI-Generated Professional Summary:*\n\n"
+                            f"{summary}\n\n"
+                            f"━━━━━━━━━━━━━━━━\n\n"
+                            f"✅ Happy with this? Type *yes* to continue.\n"
+                            f"📝 Or send your own summary to replace it.\n"
+                            f"🔄 Type *continue* to see it again.")
+                    
+                except Exception as e:
+                    logger.error(f"[summary] AI generation failed: {e}")
+                    return ("⚠️ AI summary generation unavailable.\n\n"
+                            "Please write a 2-3 sentence professional summary:\n\n"
+                            "*Example:* Data Analyst with 5+ years building dashboards.")
+            
+            # User sent something else (not a wake word) - treat as custom summary
+            if t and t_lower not in WAKE_WORDS:
+                # User is writing their own summary
+                answers["summary"] = t
                 job.answers = answers
                 flag_modified(job, "answers")
                 db.commit()
                 
-                logger.info(f"[summary] AI summary generated successfully for job {job.id}")
-
-                return (f"✨ *AI-Generated Professional Summary:*\n\n"
-                        f"{summary}\n\n"
-                        f"━━━━━━━━━━━━━━━━\n\n"
-                        f"✅ Happy with this? Type *yes* to continue.\n"
-                        f"📝 Or send your own summary to replace it.\n"
-                        f"🔄 Type *continue* to see it again.")
-                
-            except Exception as e:
-                logger.error(f"[summary] AI generation failed: {e}")
-                return ("⚠️ AI summary generation unavailable.\n\n"
-                        "Please write a 2-3 sentence professional summary:\n\n"
-                        "*Example:* Data Analyst with 5+ years building dashboards.")
+                # Move to preview
+                _advance(db, job, answers, "preview")
+                preview_text = _format_preview(answers)
+                return f"{preview_text}\n\n✅ Reply *yes* to generate your document or */reset* to start over!"
+            
+            # No input yet - wait for wake word or custom summary
+            return ("⏳ *Ready to generate your AI summary!*\n\n"
+                    "Type *continue* to start AI generation, or *skip* to write your own.")
         
         # Summary already exists - check for wake words
         if t_lower in WAKE_WORDS and not t_lower in {"yes", "y", "ok", "okay", "good", "done"}:
@@ -677,8 +700,8 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
                     f"Or type *continue* to see it again.")
 
         # Move to preview/review
-            _advance(db, job, answers, "preview")
-            preview_text = _format_preview(answers)
+        _advance(db, job, answers, "preview")
+        preview_text = _format_preview(answers)
         return f"{preview_text}\n\n✅ Reply *yes* to generate your document or */reset* to start over!"
 
     # ---- PERSONAL INFO (BEFORE SUMMARY) ----
@@ -694,8 +717,18 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         
         # Move to summary generation (using personal_info)
         _advance(db, job, answers, "summary")
-        step = "summary"
-        # Fall through to summary generation
+        
+        # Return clear instructions for AI summary generation
+        return ("🤖 *AI Summary Generation Ready*\n\n"
+                "I'm about to craft your professional summary using AI based on:\n"
+                "• Your target role\n"
+                "• Your work experience\n"
+                "• Your skills\n"
+                "• Your personal info\n\n"
+                "⏱️ *This will take approximately 30-60 seconds*\n\n"
+                "📝 *What to do:*\n"
+                "Type *continue* when you're ready for me to generate it!\n\n"
+                "💡 Or you can type *skip* to write your own summary.")
 
     # ---- PREVIEW ----
     if step == "preview":
@@ -1594,7 +1627,7 @@ async def generate_sample_document(db: Session, user_id: int, template_choice: s
         raise Exception(f"Document generation failed: {str(e)}")
 
 
-async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: str | None = None, telegram_username: str | None = None) -> str:
+async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: str | None = None, telegram_username: str | None = None, first_name: str = "there") -> str:
     # NOTE: Deduplication is handled in webhook.py before calling this function
 
     # 0) Ensure user
@@ -1620,6 +1653,37 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
     # 1) Log inbound message
     db.add(Message(user_id=user.id, direction="inbound", content=incoming))
     db.commit()
+
+    # 1.4) Onboarding: user awaiting intent response — route to intent handler first
+    onboarding_step = getattr(user, "onboarding_step", None)
+    if onboarding_step == "awaiting_intent_response":
+        if t_lower in HELP_COMMANDS:
+            return HELP_MESSAGE + "\n\n_What brings you here today? Tell me what you're looking for._"
+        if t_lower in STATUS_COMMANDS:
+            quota = payments.get_quota_status(user)
+            tier_label = "Premium" if user.tier == "pro" else "Free"
+            status_msg = f"📊 Plan: {tier_label} | Resume: {quota['resume']['used']}/{quota['resume']['limit']} | CV: {quota['cv']['used']}/{quota['cv']['limit']}"
+            return status_msg + "\n\n_What brings you here today? Tell me what you're looking for._"
+        reply = onboarding_flow.handle_onboarding_intent_response(db, user, incoming, telegram_user_id, first_name)
+        if reply:
+            return reply
+
+    # 1.45) /start and greetings — onboarding or menu
+    if t_lower in GREETINGS:
+        if hasattr(user, "onboarding_step") and user.onboarding_step:
+            user.onboarding_step = None
+            db.commit()
+        is_onboarded = getattr(user, "onboarding_complete", True) or True
+        job_count = db.query(Job).filter(Job.user_id == user.id).count()
+        active_job = _active_collecting_job(db, user.id)
+        if not is_onboarded and job_count == 0:
+            return onboarding_flow.handle_new_user_welcome(db, user, first_name)
+        if active_job:
+            doc_label = {"resume": "resume", "cv": "CV", "cover": "cover letter"}.get(active_job.type, active_job.type)
+            msg = onboarding_flow.ACTIVE_JOB_PROMPT.format(first_name=first_name, doc_type=doc_label)
+            return f"__SHOW_ONBOARDING_CONTINUE_MENU__|{msg}"
+        msg = onboarding_flow.RETURNING_USER_MENU.format(first_name=first_name)
+        return f"__SHOW_DOCUMENT_MENU__|{user.tier}|{msg}"
 
     # 1.5) Admin commands (only for admins)
     # Check if message starts with any admin command
@@ -1884,9 +1948,6 @@ Or simply type what you want to create!"""
             logger.info(f"[handle_inbound] Reset triggered, closed job.id={j.id}")
         return "__SHOW_MENU__"
 
-    if t_lower in GREETINGS:
-        return "__SHOW_MENU__"
-
     # 2.5) Handle tier selection (Free/Premium)
     if t_lower in {"free", "premium", "pro"}:
         # Update user tier
@@ -1909,8 +1970,10 @@ Or simply type what you want to create!"""
         return f"__SHOW_DOCUMENT_MENU__|{user.tier}|{tier_msg}"
 
     # 3) Get/create active job (based on intent if present)
-    doc_type = infer_type(incoming)
-    logger.info(f"[handle_inbound] doc_type={doc_type}, user.tier={user.tier}, user.id={user.id}")
+    # Only infer doc_type if there's no active job to avoid false positives
+    active_job = _active_collecting_job(db, user.id)
+    doc_type = infer_type(incoming) if not active_job else None
+    logger.info(f"[handle_inbound] doc_type={doc_type}, active_job={'Yes' if active_job else 'No'}, user.tier={user.tier}, user.id={user.id}")
 
     # Check if free user is trying to access cover letter
     if doc_type == "cover" and user.tier == "free":

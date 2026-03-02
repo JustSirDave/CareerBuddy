@@ -3,7 +3,9 @@ CareerBuddy - AI Service
 AI service for generating skills and summaries using OpenAI.
 Author: Sir Dave
 """
-from typing import List, Dict
+import json
+import re
+from typing import List, Dict, Any
 from loguru import logger
 from openai import OpenAI
 from app.config import settings
@@ -396,3 +398,51 @@ def get_fallback_summary(answers: Dict) -> str:
         parts.append("Delivering reliable results and clean execution.")
 
     return " ".join(parts)
+
+
+def detect_onboarding_intent(user_message: str) -> Dict[str, Any]:
+    """
+    Classify user's onboarding message into document intent.
+    Returns: {intent, confidence, extracted_role, extracted_company}
+    """
+    if not client:
+        logger.warning("[ai] OpenAI not configured, returning unclear intent")
+        return {"intent": "unclear", "confidence": "low", "extracted_role": None, "extracted_company": None}
+
+    try:
+        prompt = f"""You are an assistant helping classify a job seeker's intent.
+Based on their message, return ONLY a JSON object with these exact keys:
+- "intent": one of "resume", "cv", "cover_letter", "bundle", "unclear"
+- "confidence": "high" or "low"
+- "extracted_role": job title if mentioned, else null
+- "extracted_company": company name if mentioned, else null
+
+Message: "{user_message}"
+"""
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a resume expert. Return only valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=150
+        )
+        content = response.choices[0].message.content.strip()
+        json_match = re.search(r"\{[^{}]*\}", content, re.DOTALL)
+        if json_match:
+            data = json.loads(json_match.group())
+        else:
+            data = json.loads(content)
+        intent = data.get("intent", "unclear")
+        if intent not in ("resume", "cv", "cover_letter", "bundle", "unclear"):
+            intent = "unclear"
+        return {
+            "intent": intent,
+            "confidence": data.get("confidence", "low") or "low",
+            "extracted_role": data.get("extracted_role"),
+            "extracted_company": data.get("extracted_company")
+        }
+    except Exception as e:
+        logger.error(f"[ai] Intent detection failed: {e}")
+        return {"intent": "unclear", "confidence": "low", "extracted_role": None, "extracted_company": None}
