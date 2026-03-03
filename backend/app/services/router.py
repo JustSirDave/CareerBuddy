@@ -34,9 +34,16 @@ REVISE_COMMANDS = {"/revise", "revise", "request revision"}
 REFERRAL_COMMANDS = {"/referral", "referral"}
 HISTORY_COMMANDS = {"/history", "history", "my documents", "documents"}
 BUY_COMMANDS = {"/buy_resume", "/buy_cv", "/buy_cover_letter", "/buy_bundle"}
+PRICING_COMMANDS = {"/pricing", "pricing"}
 ADMIN_COMMANDS = {"/admin", "/stats", "/broadcast", "/sample", "/makeadmin", "/setpro"}
 PDF_COMMANDS = {"/pdf", "pdf", "convert to pdf", "convert pdf"}
 FORCE_LOWER = lambda s: (s or "").strip().lower()
+
+def _esc(text: str) -> str:
+    """Escape Telegram Markdown special chars in dynamic user data."""
+    for ch in ("*", "_", "`", "["):
+        text = text.replace(ch, " ")
+    return text
 
 STEP_LABELS = {
     "basics": "Your basic details",
@@ -112,10 +119,11 @@ I help you create professional resumes, CVs, and cover letters tailored to your 
 *💡 Commands:*
 /start - Start creating a document
 /status - Check your credits
-/buy\\_resume - Buy a resume credit (₦7,500)
-/buy\\_cv - Buy a CV credit (₦7,500)
-/buy\\_cover\\_letter - Buy a cover letter credit (₦3,000)
-/buy\\_bundle - 2 docs + 1 cover letter (₦15,000)
+/buy_resume - Buy a resume credit (₦7,500)
+/buy_cv - Buy a CV credit (₦7,500)
+/buy_cover_letter - Buy a cover letter credit (₦3,000)
+/buy_bundle - 2 docs + 1 cover letter (₦15,000)
+/pricing - View pricing details
 /pdf - Convert document to PDF (paid credits)
 /referral - Share & earn free credits
 /reset - Cancel and start over
@@ -128,7 +136,7 @@ I help you create professional resumes, CVs, and cover letters tailored to your 
 • Bundle (2 docs + 1 cover letter) — ₦15,000
 
 *🆘 Need Support?*
-Contact: @your\\_support\\_username
+Contact: @your_support_username
 
 Ready to begin? Just type /start!"""
 
@@ -247,7 +255,7 @@ async def convert_to_pdf(db: Session, user: User, telegram_user_id: str) -> str:
             "🔒 *PDF Format — Paid Credits Only*\n\n"
             "PDF conversion is available when you use a paid credit.\n\n"
             "Free documents are delivered as DOCX only.\n\n"
-            "Type /buy\\_resume or /buy\\_bundle to purchase credits!"
+            "Type /buy_resume or /buy_bundle to purchase credits!"
         )
     return f"__SEND_PDF__|{telegram_user_id}|placeholder"
 
@@ -1196,7 +1204,7 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
             if target_user_id:
                 return await admin_set_user_pro(db, target_user_id, telegram_user_id)
             return ("👤 *Grant Credits to User*\n\n"
-                    "*Usage:* /setpro <telegram\\_user\\_id>\n\n"
+                    "*Usage:* /setpro <telegram_user_id>\n\n"
                     "*Example:* /setpro 123456789\n\n"
                     "_Grants 2 doc + 1 CL credits and notifies the user._")
         elif t_lower.startswith("/sample"):
@@ -1223,7 +1231,7 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
                 return f"__SEND_DOCUMENT__|{job_id}|{filename}"
             except Exception as e:
                 logger.error(f"[handle_inbound] Sample generation failed: {e}")
-                error_msg = str(e).replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+                error_msg = str(e)
                 return (f"❌ *Sample Generation Failed*\n\n"
                         f"Error: `{error_msg}`\n\n"
                         f"Please check the logs for details.")
@@ -1243,23 +1251,47 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
     if t_lower in STATUS_COMMANDS:
         logger.info(f"[handle_inbound] Processing /status for user {telegram_user_id}")
         summary = payments.get_credit_summary(user)
-        status_msg = f"""📊 *Your Account Status*
-
-👤 User: {user.name or user.telegram_username or 'User'}
-
-*Your Credits:*
-{summary}
-
-*Pricing:*
-• Resume/CV — {payments.PRICE_DISPLAY['resume']}
-• Cover Letter — {payments.PRICE_DISPLAY['cover_letter']}
-• Bundle (2 docs + 1 CL) — {payments.PRICE_DISPLAY['bundle']} _save ₦3,000_
-
-Type /buy\\_resume, /buy\\_cv, /buy\\_cover\\_letter, or /buy\\_bundle to purchase.
-Type /referral to earn free credits!
-
-Ready to create? Type /start!"""
+        display_name = _esc(user.name or user.telegram_username or "User")
+        status_msg = (
+            "📊 Your Account Status\n\n"
+            f"👤 {display_name}\n\n"
+            f"💳 Credits:\n"
+            f"{summary}\n\n"
+            "Type /pricing to see pricing\n"
+            "Type /referral to earn free credits\n\n"
+            "Ready to create? Type /start!"
+        )
         return status_msg
+
+    # 1.7.2) Pricing command
+    if t_lower in PRICING_COMMANDS:
+        logger.info(f"[handle_inbound] Processing /pricing for user {telegram_user_id}")
+        summary = payments.get_credit_summary(user)
+        pricing_msg = (
+            "💰 CareerBuddy Pricing\n\n"
+            "Your first resume/CV and first cover letter are free!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📄 Resume / CV — {payments.PRICE_DISPLAY['resume']} per credit\n\n"
+            f"✉️ Cover Letter — {payments.PRICE_DISPLAY['cover_letter']} per credit\n\n"
+            f"🎁 Bundle (best value) — {payments.PRICE_DISPLAY['bundle']}\n"
+            "   2 document credits + 1 cover letter credit\n"
+            "   Save ₦3,000!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📝 How credits work:\n"
+            "• Free credit → DOCX only\n"
+            "• Paid credit → DOCX + PDF\n"
+            "• Bundle credits work for any resume or CV\n\n"
+            "🎁 Earn free credits:\n"
+            "Type /referral to get your referral link\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"💳 Your balance:\n{summary}\n\n"
+            "Purchase commands:\n"
+            "/buy_resume — 1 resume/CV credit\n"
+            "/buy_cv — 1 resume/CV credit\n"
+            "/buy_cover_letter — 1 cover letter credit\n"
+            "/buy_bundle — 2 doc + 1 CL credits"
+        )
+        return pricing_msg
 
     # 1.7.4) Render retry
     if t_lower in {"retry", "try again", "retry again"}:
@@ -1323,7 +1355,7 @@ Ready to create? Type /start!"""
         }
         product_type = product_map.get(t_lower)
         if not product_type:
-            return "Invalid command. Try /buy\\_resume, /buy\\_cv, /buy\\_cover\\_letter, or /buy\\_bundle."
+            return "Invalid command. Try /buy_resume, /buy_cv, /buy_cover_letter, or /buy_bundle."
         logger.info(f"[handle_inbound] Buy command: {product_type} for user {telegram_user_id}")
         result = await payments.initiate_payment(user, product_type, db)
         if "error" in result:

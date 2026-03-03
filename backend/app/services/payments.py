@@ -112,7 +112,7 @@ def can_use_pdf(user: User, credit_type: str) -> bool:
 
 def get_credit_summary(user: User) -> str:
     if _is_admin(user):
-        return "👑 *Admin* — Unlimited access"
+        return "👑 Admin — Unlimited access"
     lines = []
     if not getattr(user, "free_resume_used", False):
         lines.append("✓ 1 free resume/CV available")
@@ -136,13 +136,13 @@ def get_purchase_prompt(doc_type: str) -> str:
             f"You've used your free {doc_type}.\n\n"
             f"*Single document* — {PRICE_DISPLAY['resume']}\n"
             f"*Bundle* (2 docs + 1 cover letter) — {PRICE_DISPLAY['bundle']} _save ₦3,000_\n\n"
-            f"Type /buy\\_{doc_type} or /buy\\_bundle"
+            f"Type /buy_{doc_type} or /buy_bundle"
         )
     return (
         "You've used your free cover letter.\n\n"
         f"*Cover letter* — {PRICE_DISPLAY['cover_letter']}\n"
         f"*Bundle* (2 docs + 1 cover letter) — {PRICE_DISPLAY['bundle']} _save ₦3,000_\n\n"
-        "Type /buy\\_cover\\_letter or /buy\\_bundle"
+        "Type /buy_cover_letter or /buy_bundle"
     )
 
 

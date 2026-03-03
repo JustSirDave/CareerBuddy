@@ -16,6 +16,7 @@ RETRY_BASE_DELAY = 1  # seconds
 async def reply_text(chat_id: int | str, text: str, parse_mode: str = "Markdown"):
     """
     Send a text message via Telegram Bot API with retry on transient failures.
+    Falls back to plain text if Markdown parsing fails (400).
     Returns dict with response or {"error": str}. Never raises.
     """
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
@@ -35,6 +36,16 @@ async def reply_text(chat_id: int | str, text: str, parse_mode: str = "Markdown"
                 retry_after = int(r.headers.get("Retry-After", 5))
                 await asyncio.sleep(retry_after)
                 continue
+            if r.status_code == 400 and "can't parse entities" in (r.text or ""):
+                logger.warning(f"[telegram] Markdown parse failed for {chat_id}, retrying as plain text")
+                plain_payload = {"chat_id": chat_id, "text": text}
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    r2 = await client.post(url, json=plain_payload)
+                if r2.status_code == 200:
+                    logger.info(f"[telegram] Message sent as plain text to {chat_id}")
+                    return r2.json() if r2.content else {}
+                last_error = f"{r2.status_code} {r2.text}"
+                break
             last_error = f"{r.status_code} {r.text}"
         except (httpx.TimeoutException, httpx.NetworkError) as e:
             last_error = e
