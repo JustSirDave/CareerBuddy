@@ -2,6 +2,8 @@
 CareerBuddy - AI-powered resume, CV, and cover letter generator
 Author: Sir Dave
 """
+import json
+import logging
 import uuid
 import time
 from pathlib import Path
@@ -19,6 +21,30 @@ from app.db import get_db
 from app.middleware import RateLimitMiddleware, rate_limiter
 
 app = FastAPI(title="CareerBuddy Backend")
+
+
+class JSONFormatter(logging.Formatter):
+    """Structured JSON logging for traceability."""
+
+    def format(self, record):
+        log_record = {
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "module": record.module,
+            "time": self.formatTime(record),
+        }
+        if record.exc_info:
+            log_record["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_record)
+
+
+def _configure_structured_logging():
+    """Configure structured JSON logging at app startup."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(JSONFormatter())
+    logging.basicConfig(level=logging.INFO, handlers=[handler])
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
 
 
 class RequestLogMiddleware(BaseHTTPMiddleware):
@@ -74,6 +100,7 @@ async def _register_telegram_webhook() -> None:
 @app.on_event("startup")
 async def startup_event():
     """Check required env and register webhook when PUBLIC_URL is public."""
+    _configure_structured_logging()
     required = [
         ("TELEGRAM_BOT_TOKEN", settings.telegram_bot_token),
     ]
@@ -81,6 +108,15 @@ async def startup_event():
     if missing:
         logger.warning(f"[BOOT] Missing required env: {', '.join(missing)}")
     await _register_telegram_webhook()
+    from app.services.scheduler import start_scheduler
+    start_scheduler()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Stop scheduler on shutdown."""
+    from app.services.scheduler import stop_scheduler
+    stop_scheduler()
 
 
 @app.get("/health/db")

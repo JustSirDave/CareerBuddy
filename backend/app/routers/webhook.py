@@ -4,7 +4,8 @@ Handles Telegram and Paystack webhooks
 Author: Sir Dave
 """
 from pathlib import Path
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Request, Depends
+from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -23,21 +24,30 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 async def telegram_webhook(request: Request, db=Depends(get_db)):
     """
     Telegram Bot webhook endpoint.
-    Receives updates from Telegram and processes them.
+    Always returns 200 to stop Telegram retries; logs errors internally.
     """
     try:
         payload = await request.json()
         logger.debug(f"[telegram_webhook] Received update: {payload}")
     except Exception as e:
         logger.error(f"[telegram_webhook] Failed to parse JSON: {e}")
-        raise HTTPException(status_code=400, detail="Invalid JSON")
+        return JSONResponse(status_code=200, content={"ok": True})
 
-    # Handle callback queries (inline keyboard buttons)
+    try:
+        await _process_telegram_update(payload, db)
+    except Exception as e:
+        logger.exception(f"[telegram_webhook] Unhandled error processing update {payload.get('update_id')}: {e}")
+    return JSONResponse(status_code=200, content={"ok": True})
+
+
+async def _process_telegram_update(payload: dict, db):
+    """Process Telegram update. Exceptions are caught by caller."""
     if "callback_query" in payload:
-        return await handle_callback_query(payload["callback_query"], db)
+        await handle_callback_query(payload["callback_query"], db)
+        return
 
     # Check for document uploads FIRST (before text extraction)
-    message = payload.get("message", {})
+    message = payload.get("message") or payload.get("edited_message") or {}
     document = message.get("document")
     supported_mimes = [
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
@@ -52,102 +62,59 @@ async def telegram_webhook(request: Request, db=Depends(get_db)):
         username = from_user.get("username")
         msg_id = message.get("message_id")
         
-        # Deduplication for document uploads
         if msg_id and seen_or_mark(str(msg_id)):
             logger.warning(f"[telegram_webhook] Duplicate document upload msg_id={msg_id}, skipping")
-            return {"ok": True}
-        
+            return
         if chat_id:
-            # User uploaded a document - route to appropriate handler
             await handle_document_upload(chat_id, document, db, username)
-            return {"ok": True}
+        return
 
     # Extract message from Telegram update
     chat_id, text, msg_id, username, first_name = extract_telegram_message(payload)
     if not chat_id:
         logger.debug("[telegram_webhook] No valid message found, ignoring")
-        return {"ok": True}
+        return
 
-    # EARLY DEDUPLICATION: Check BEFORE calling handle_inbound
     if msg_id and seen_or_mark(str(msg_id)):
         logger.warning(f"[telegram_webhook] Duplicate msg_id={msg_id} from chat_id={chat_id}, skipping")
-        return {"ok": True}
+        return
 
-    # Show typing indicator while processing
     await send_typing_action(chat_id)
-
-    # Process the message (using str(chat_id) as user identifier)
     reply = await handle_inbound(db, str(chat_id), text or "", msg_id=str(msg_id), telegram_username=username, first_name=first_name)
 
     if reply == "__SHOW_MENU__":
         await send_choice_menu(chat_id)
-        return {"ok": True}
-
+        return
     if reply and reply.startswith("__SHOW_ONBOARDING_CONTINUE_MENU__|"):
         parts = reply.split("|", 1)
         if len(parts) == 2:
             await send_onboarding_continue_menu(chat_id, parts[1])
-        return {"ok": True}
-
+        return
     if reply and reply.startswith("__SHOW_DOCUMENT_MENU__|"):
         parts = reply.split("|", 2)
         if len(parts) >= 2:
             tier = parts[1]
-            # If there's a confirmation message, send it first
             if len(parts) == 3:
-                confirmation_msg = parts[2]
-                await reply_text(chat_id, confirmation_msg)
-            # Then show document type menu
+                await reply_text(chat_id, parts[2])
             await send_document_type_menu(chat_id, tier)
-        return {"ok": True}
-
-    # Check if document should be sent
+        return
     if reply and reply.startswith("__SEND_DOCUMENT__|"):
         parts = reply.split("|")
         if len(parts) == 3:
             _, job_id, filename = parts
-            await send_document_to_user(chat_id, job_id, filename)
-        return {"ok": True}
-
-    # Check if PDF should be sent
+            await send_document_to_user(chat_id, job_id, filename, db)
+        return
     if reply and reply.startswith("__SEND_PDF__|"):
         parts = reply.split("|")
         if len(parts) >= 2:
             user_id = parts[1]
             await send_pdf_to_user(chat_id, user_id, db)
-        return {"ok": True}
-
-    # Check if template selection menu should be shown
+        return
     if reply == "__SHOW_TEMPLATE_MENU__":
-        from app.models import User
-        user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
-        if user:
-            await send_template_selection(chat_id, user.tier)
-        return {"ok": True}
-
-    # Check if payment is required
-    if reply and reply.startswith("__PAYMENT_REQUIRED__|"):
-        parts = reply.split("|")
-        if len(parts) == 3:
-            _, role, amount_str = parts
-            from app.services import payments
-            from app.models import User
-
-            # Get user
-            user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
-            if user:
-                # Create payment link
-                payment_result = await payments.create_payment_link(user, role, int(amount_str))
-
-                if payment_result.get("authorization_url"):
-                    await send_payment_request(chat_id, payment_result["authorization_url"], int(amount_str))
-                else:
-                    await reply_text(chat_id, "❌ *Payment Error*\n\nSorry, we couldn't generate your payment link. Please contact support or try again later.")
-        return {"ok": True}
-
+        await send_template_selection(chat_id, "credits")
+        return
     if reply:
         await reply_text(chat_id, reply)
-    return {"ok": True}
 
 
 async def handle_document_upload(chat_id: int | str, document: dict, db: Session, username: str | None = None):
@@ -193,7 +160,7 @@ async def handle_document_upload(chat_id: int | str, document: dict, db: Session
 
         # Validate file format
         is_valid, file_type, error_msg = document_parser.validate_file_format(
-            file_name, mime_type, user.tier
+            file_name, mime_type, "pro"
         )
 
         if not is_valid:
@@ -302,8 +269,7 @@ async def handle_revamp_upload(chat_id: int | str, file_path: Path, file_type: s
 
         logger.info(f"[handle_revamp_upload] Stored content in job.id={job.id}, advancing to processing")
 
-        # Trigger revamp processing through router
-        reply = await router.handle_revamp(db, job, "", user_tier=user.tier)
+        reply = await router.handle_revamp(db, job, "")
 
         if reply:
             await reply_text(chat_id, reply)
@@ -325,7 +291,7 @@ async def handle_revamp_upload(chat_id: int | str, file_path: Path, file_type: s
                        f"_Error: {str(e)}_")
 
 
-async def send_document_to_user(chat_id: int | str, job_id: str, filename: str):
+async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, db=None):
     """
     Send the generated document to the user via Telegram.
 
@@ -349,6 +315,14 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str):
 
         if send_resp and not send_resp.get("error"):
             logger.info(f"[telegram_webhook] Document sent to {chat_id}: {filename}")
+            # Mark job as delivered for delivery confirmation (24hr follow-up)
+            if db:
+                from datetime import datetime
+                job = db.query(Job).filter(Job.id == job_id).first()
+                if job:
+                    job.status = "done"
+                    job.completed_at = datetime.utcnow()
+                    db.commit()
             success_msg = """✅ *Document Delivered as .docx for Review!*
 
 📝 *Review & Edit:*
@@ -419,25 +393,10 @@ async def send_pdf_to_user(chat_id: int | str, user_id: str, db: Session):
             await reply_text(chat_id, "❌ User not found. Please start with /start.")
             return
 
-        # Check if user has premium access
-        if user.tier != "pro":
-            await reply_text(chat_id, """🔒 *PDF Export is a Premium Feature*
-
-To convert your documents to PDF, you need premium access.
-
-*Premium Benefits:*
-• PDF export for all document types
-• Priority support
-• Unlimited document generations
-• Advanced templates
-
-Type /upgrade to get premium access now!""")
-            return
-
-        # Find the latest job
+        # Find the latest completed job
         latest_job = db.query(Job).filter(
-            Job.user_id == user.id, 
-            Job.status == "completed"
+            Job.user_id == user.id,
+            Job.status.in_(["done", "completed", "preview_ready"]),
         ).order_by(Job.created_at.desc()).first()
         
         if not latest_job:
@@ -579,13 +538,12 @@ async def handle_callback_query(callback_query: dict, db):
         elif data == "onboarding_start_fresh":
             from app.models import Job, User
             user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
-            tier = user.tier if user else "free"
             if user:
                 j = db.query(Job).filter(Job.user_id == user.id, Job.status == "collecting").order_by(Job.created_at.desc()).first()
                 if j:
                     j.status = "closed"
                     db.commit()
-            await send_document_type_menu(chat_id, tier)
+            await send_document_type_menu(chat_id, "credits")
 
         elif data == "learn_more":
             # Show more info about the service
@@ -607,8 +565,10 @@ I'm an AI-powered assistant that helps you create professional career documents 
 • Instant delivery
 
 *💰 Pricing:*
-• Free: 2 documents
-• Paid: ₦7,500 per document
+• First document free!
+• Resume/CV: ₦7,500
+• Cover letter: ₦3,000
+• Bundle: ₦15,000 (2 docs + 1 cover letter)
 
 Ready to create? Type /start!"""
             await reply_text(chat_id, info_msg)
@@ -647,7 +607,7 @@ Ready to create? Type /start!"""
                 if reply and reply.startswith("__SEND_DOCUMENT__|"):
                     parts = reply.split("|")
                     if len(parts) == 3:
-                        await send_document_to_user(chat_id, parts[1], parts[2])
+                        await send_document_to_user(chat_id, parts[1], parts[2], db)
                 elif reply:
                     await reply_text(chat_id, reply)
             else:
@@ -707,8 +667,8 @@ def extract_telegram_message(payload: dict) -> tuple[int | None, str | None, int
         Tuple of (chat_id, text, msg_id, username, first_name)
     """
     try:
-        # Check if it's a message update
-        message = payload.get("message")
+        # Check for message or edited_message (Telegram sends one or the other)
+        message = payload.get("message") or payload.get("edited_message")
 
         if not message:
             logger.debug(f"[telegram_webhook] Non-message update type, ignoring")
@@ -746,10 +706,8 @@ def extract_telegram_message(payload: dict) -> tuple[int | None, str | None, int
 @router.post("/paystack")
 async def paystack_webhook(request: Request, db=Depends(get_db)):
     """
-    Paystack webhook endpoint for payment notifications.
-
-    Paystack sends webhooks for various payment events.
-    We primarily care about 'charge.success' events.
+    Paystack webhook endpoint.
+    Uses confirm_payment_and_award_credits for idempotent credit granting.
     """
     try:
         payload = await request.json()
@@ -758,71 +716,38 @@ async def paystack_webhook(request: Request, db=Depends(get_db)):
         event = payload.get("event")
         data = payload.get("data", {})
 
-        # Only process successful charges
         if event == "charge.success":
             reference = data.get("reference")
-            amount = data.get("amount")  # in kobo
-            status = data.get("status")
-            metadata = data.get("metadata", {})
+            if not reference:
+                logger.warning("[paystack_webhook] No reference in payload")
+                return {"status": "ok"}
 
-            if status == "success":
-                user_id = metadata.get("user_id")
-                telegram_user_id = metadata.get("telegram_user_id")
-                purpose = metadata.get("role")  # Can be "premium_upgrade" or a target role
+            from app.services import payments as pay_svc
+            result = await pay_svc.confirm_payment_and_award_credits(reference, db)
 
-                if user_id:
-                    from app.services import payments
-                    from app.services.telegram import reply_text
-                    from app.models import User
+            if result:
+                user, product_type = result
+                awards = pay_svc.CREDIT_AWARDS.get(product_type, {})
+                credit_lines = []
+                if awards.get("document_credits"):
+                    credit_lines.append(f"📄 {awards['document_credits']} document credit{'s' if awards['document_credits'] > 1 else ''}")
+                if awards.get("cover_letter_credits"):
+                    credit_lines.append(f"✉️ {awards['cover_letter_credits']} cover letter credit{'s' if awards['cover_letter_credits'] > 1 else ''}")
+                credit_text = "\n".join(credit_lines)
 
-                    # Record payment
-                    payments.record_payment(db, user_id, reference, amount, metadata, raw_payload=payload)
+                if user.telegram_user_id:
+                    await reply_text(
+                        user.telegram_user_id,
+                        f"✅ *Payment Confirmed!*\n\n"
+                        f"Credits added:\n{credit_text}\n\n"
+                        f"Your balance:\n{pay_svc.get_credit_summary(user)}\n\n"
+                        f"Ready to create your document? Type /start!",
+                    )
 
-                    # Check if this is a premium upgrade payment
-                    if purpose == "premium_upgrade":
-                        # Upgrade user to pro tier
-                        user = db.query(User).filter(User.id == user_id).first()
-                        if user:
-                            user.tier = "pro"
-                            db.commit()
-                            logger.info(f"[paystack_webhook] User {user_id} upgraded to pro tier")
-
-                            # Notify user of upgrade
-                            if telegram_user_id:
-                                await reply_text(
-                                    telegram_user_id,
-                                    """🎉 *Payment Confirmed - You're Now Premium!*
-
-✅ Account upgraded successfully
-
-You now have access to:
-• 🎨 Multiple professional templates
-• 📄 Unlimited PDF conversions
-• 🚀 Priority AI enhancements
-• 💼 All document types (Resume, CV, Cover Letter, Revamp)
-
-*🚀 Ready to create?*
-Type /start to see the menu, then choose:
-• *Resume* - Professional 1-2 page resume
-• *CV* - Detailed curriculum vitae
-• *Cover Letter* - Tailored application letter
-• *Revamp* - Improve an existing document
-
-Or simply type what you want to create!"""
-                                )
-                    else:
-                        # Regular document generation payment
-                        if telegram_user_id:
-                            await reply_text(
-                                telegram_user_id,
-                                "✅ *Payment confirmed!*\n\n"
-                                "Your document generation is now unlocked. "
-                                "Return to your conversation and type *paid* to continue."
-                            )
-
-                    logger.info(f"[paystack_webhook] Payment processed: {reference} for user {user_id}")
-                else:
-                    logger.warning(f"[paystack_webhook] No user_id in metadata for reference {reference}")
+                from app.services import referral as referral_svc
+                payment_count = referral_svc.get_completed_payment_count(user.id, db)
+                if payment_count == 1:
+                    await referral_svc.process_referral_conversion(user, db)
 
         return {"status": "ok"}
 

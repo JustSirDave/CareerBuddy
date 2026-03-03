@@ -1,6 +1,6 @@
 """
 Onboarding flow for new CareerBuddy users.
-Handles warm welcome → intent detection → flow transition.
+Handles warm welcome -> intent detection -> flow transition.
 Author: Sir Dave
 """
 from sqlalchemy.orm import Session
@@ -33,7 +33,6 @@ BUNDLE_PROMPT = """I can help you with several document types. Which would you l
 
 
 def handle_new_user_welcome(db: Session, user: User, first_name: str) -> str:
-    """Send warm welcome to brand new user, set onboarding_step."""
     user.onboarding_step = "awaiting_intent_response"
     user.onboarding_complete = False
     db.commit()
@@ -44,26 +43,22 @@ def handle_new_user_welcome(db: Session, user: User, first_name: str) -> str:
 def handle_onboarding_intent_response(
     db: Session, user: User, message_text: str, telegram_user_id: str, first_name: str
 ) -> str:
-    """
-    Process user's free-text response to the welcome message.
-    Detect intent, transition to flow or show menu.
-    """
     result = ai.detect_onboarding_intent(message_text)
     intent = result.get("intent", "unclear")
     confidence = result.get("confidence", "low")
     extracted_role = result.get("extracted_role")
     extracted_company = result.get("extracted_company")
 
-    if intent == "cover_letter" and user.tier == "free":
+    if intent == "cover_letter" and not payments.can_generate(user, "cover"):
         user.onboarding_complete = True
         user.onboarding_step = None
         db.commit()
         msg = (
-            "💼 *Cover Letters are a Premium feature*\n\n"
-            "Upgrade to Premium and unlock professional cover letter generation.\n\n"
-            "In the meantime, I can help you with a Resume or CV. What would you like?"
+            "You've used your free cover letter credit.\n\n"
+            "You can purchase more with /buy\\_cover\\_letter, "
+            "or I can help you with a Resume or CV instead."
         )
-        return f"__SHOW_DOCUMENT_MENU__|{user.tier}|{msg}"
+        return f"__SHOW_DOCUMENT_MENU__|credits|{msg}"
 
     if confidence == "high" and intent in ("resume", "cv", "cover_letter"):
         return _transition_to_flow(db, user, intent, extracted_role, extracted_company, first_name)
@@ -72,19 +67,18 @@ def handle_onboarding_intent_response(
         user.onboarding_complete = True
         user.onboarding_step = None
         db.commit()
-        return f"__SHOW_DOCUMENT_MENU__|{user.tier}|{BUNDLE_PROMPT}"
+        return f"__SHOW_DOCUMENT_MENU__|credits|{BUNDLE_PROMPT}"
 
     user.onboarding_complete = True
     user.onboarding_step = None
     db.commit()
-    return f"__SHOW_DOCUMENT_MENU__|{user.tier}|{SOFT_MENU_PROMPT}"
+    return f"__SHOW_DOCUMENT_MENU__|credits|{SOFT_MENU_PROMPT}"
 
 
 def _transition_to_flow(
     db: Session, user: User, intent: str, extracted_role: str | None,
     extracted_company: str | None, first_name: str
 ) -> str:
-    """Create job, mark onboarding complete, return first question."""
     user.onboarding_complete = True
     user.onboarding_step = None
     db.commit()
@@ -92,15 +86,8 @@ def _transition_to_flow(
 
     job_type = "cover" if intent == "cover_letter" else intent
 
-    payments.check_and_reset_quota(db, user)
-    payments.check_premium_expiry(db, user)
-    db.refresh(user)
-
-    if not payments.can_generate_document(db, user, job_type):
-        return (
-            "📦 *You've reached your monthly limit* for this document type.\n\n"
-            "Type */upgrade* to get more, or */status* to see your quota."
-        )
+    if not payments.can_generate(user, job_type):
+        return payments.get_purchase_prompt(job_type)
 
     answers = resume_flow.start_context() | {"_step": "basics"}
     if extracted_role:

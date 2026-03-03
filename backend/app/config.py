@@ -19,6 +19,7 @@ class Settings(BaseModel):
 
     # Telegram Bot
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    telegram_bot_username: str = os.getenv("TELEGRAM_BOT_USERNAME", "CareerBuddyBot")
     admin_telegram_ids: list[str] = [
         id.strip() for id in os.getenv("ADMIN_TELEGRAM_IDS", "").split(",")
         if id.strip()

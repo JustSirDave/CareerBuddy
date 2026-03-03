@@ -2,7 +2,7 @@
 CareerBuddy - Job Model
 Author: Sir Dave
 """
-from sqlalchemy import Column, String, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, String, DateTime, JSON, ForeignKey, Integer, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db import Base
@@ -23,6 +23,14 @@ class Job(Base):
     final_text = Column(String)  # Processed final version
 
     last_msg_id = Column(String(255), index=True)  # Telegram message deduplication
+
+    # Revision system: 1 free revision per paid document
+    revision_count = Column(Integer, default=0, nullable=False)
+    revision_answers = Column(JSON, default=dict)  # Section-specific updates during revision
+
+    # Delivery confirmation: 24hr follow-up
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    delivery_confirmation_sent = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())

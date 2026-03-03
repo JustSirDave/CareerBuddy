@@ -32,6 +32,9 @@ openai = "^1.0.0"
 # Telegram Bot
 python-telegram-bot = "^21.0"
 
+# Scheduler
+apscheduler = "^3.10.0"
+
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.8.0"

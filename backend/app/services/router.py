@@ -10,8 +10,10 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.models import User, Job, Message
 from app.flows import resume as resume_flow
 from app.flows import onboarding as onboarding_flow
+from app.flows.validators import validate_basics, validate_experience_bullets
 from app.services.idempotency import seen_or_mark
 from app.services import renderer, storage, ai, payments
+from app.services.error_handler import handle_error, ErrorType, ERROR_MESSAGES
 
 WELCOME = """👋 *Welcome to Career Buddy!*
 
@@ -28,22 +30,53 @@ GREETINGS = {"hi", "hello", "hey", "start", "menu", "/start"}
 RESETS = {"reset", "/reset", "restart"}
 HELP_COMMANDS = {"/help", "help"}
 STATUS_COMMANDS = {"/status", "status"}
+REVISE_COMMANDS = {"/revise", "revise", "request revision"}
+REFERRAL_COMMANDS = {"/referral", "referral"}
 HISTORY_COMMANDS = {"/history", "history", "my documents", "documents"}
-UPGRADE_COMMANDS = {"/upgrade", "upgrade"}
-PAYMENT_BYPASS_PHRASES = {"payment made", "paid", "payment done", "payment complete"}
+BUY_COMMANDS = {"/buy_resume", "/buy_cv", "/buy_cover_letter", "/buy_bundle"}
 ADMIN_COMMANDS = {"/admin", "/stats", "/broadcast", "/sample", "/makeadmin", "/setpro"}
 PDF_COMMANDS = {"/pdf", "pdf", "convert to pdf", "convert pdf"}
 FORCE_LOWER = lambda s: (s or "").strip().lower()
 
+STEP_LABELS = {
+    "basics": "Your basic details",
+    "target_role": "Target job role",
+    "experience_header": "Work experience",
+    "experience_bullets": "Achievement bullets",
+    "add_another_experience": "Add another experience",
+    "skills": "Skills",
+    "summary": "Professional summary",
+    "education": "Education",
+    "certifications": "Certifications",
+    "profiles": "Online profiles",
+    "projects": "Projects",
+    "preview": "Final preview",
+    "draft_ready": "Finalizing your document",
+}
+
+STEP_REPROMPTS = {
+    "basics": "What's your full name, email, phone, and location?\n_(e.g. Ada Obi, ada@email.com, 08012345678, Lagos)_",
+    "target_role": "What job title are you applying for?",
+    "experience_header": "Tell me about your work experience — role, company, city, and dates.",
+    "experience_bullets": "Send 2–4 bullet points describing your achievements for this role.",
+    "add_another_experience": "Add another experience? (Reply: yes / no)",
+    "skills": "Select skills from the list or type your own.",
+    "summary": "Share a bit about yourself for your summary, or type *skip*.",
+    "education": "Add education: Degree, School, Year. Type *done* when finished.",
+    "certifications": "Add certifications or type *done* to continue.",
+    "profiles": "Add profile links: Platform, URL. Type *done* to continue.",
+    "projects": "Add projects or type *done* to continue.",
+    "preview": "Review your document and confirm.",
+    "draft_ready": "We're finalizing your document — please wait.",
+}
+
 
 def is_admin(telegram_user_id: str) -> bool:
-    """Check if user is an admin."""
     from app.config import settings
     return telegram_user_id in settings.admin_telegram_ids
 
 
 def _progress_bar(current_step: int, total_steps: int) -> str:
-    """Generate a visual progress bar."""
     filled = "●" * current_step
     empty = "○" * (total_steps - current_step)
     percentage = int((current_step / total_steps) * 100)
@@ -51,22 +84,16 @@ def _progress_bar(current_step: int, total_steps: int) -> str:
 
 
 def _add_progress(message: str, step: str) -> str:
-    """Add progress indicator to a message based on current step."""
-    # Define step order and total for resume/CV flow
-    steps_order = ["basics", "summary", "skills", "experiences", "experience_bullets", 
+    steps_order = ["basics", "summary", "skills", "experiences", "experience_bullets",
                    "education", "projects", "target_role", "review"]
-    
     if step not in steps_order:
         return message
-    
     current = steps_order.index(step) + 1
     total = len(steps_order)
     progress = _progress_bar(current, total)
-    
     return f"📊 *Progress:* {progress}\n\n{message}"
 
 
-# Help message
 HELP_MESSAGE = """🤖 *Career Buddy - Help Guide*
 
 I help you create professional resumes, CVs, and cover letters tailored to your dream role!
@@ -74,8 +101,7 @@ I help you create professional resumes, CVs, and cover letters tailored to your 
 *📝 Available Documents:*
 • *Resume* - 1-2 page professional resume
 • *CV* - Detailed curriculum vitae
-• *Revamp* - Coming Soon!
-• *Cover Letter* - Premium feature
+• *Cover Letter* - Tailored application letter
 
 *🎯 How It Works:*
 1. Choose your document type
@@ -85,36 +111,31 @@ I help you create professional resumes, CVs, and cover letters tailored to your 
 
 *💡 Commands:*
 /start - Start creating a document
-/status - Check your plan & remaining documents
-/upgrade - Upgrade to Premium
-/pdf - Convert document to PDF (Premium)
+/status - Check your credits
+/buy\\_resume - Buy a resume credit (₦7,500)
+/buy\\_cv - Buy a CV credit (₦7,500)
+/buy\\_cover\\_letter - Buy a cover letter credit (₦3,000)
+/buy\\_bundle - 2 docs + 1 cover letter (₦15,000)
+/pdf - Convert document to PDF (paid credits)
+/referral - Share & earn free credits
 /reset - Cancel and start over
 /help - Show this help message
 
 *💳 Pricing:*
-• *Free Plan*: 2 free documents
-• *Pay-Per-Generation*: ₦7,500 per document
-• *Premium Plan*: ₦7,500 (one-time, all features)
-
-*⭐ Premium Features:*
-• Multiple professional templates
-• Unlimited PDF conversions
-• Priority AI enhancements
-• All document types
+• *1st document free* — then pay per document
+• Resume/CV — ₦7,500
+• Cover Letter — ₦3,000
+• Bundle (2 docs + 1 cover letter) — ₦15,000
 
 *🆘 Need Support?*
-Contact: @your_support_username
+Contact: @your\\_support\\_username
 
 Ready to begin? Just type /start!"""
 
 
 def _advance(db: Session, job: Job, answers: dict, next_step: str):
-    """
-    Advance to the next step AND commit immediately to prevent loops.
-    """
     answers["_step"] = next_step
     job.answers = answers
-    # CRITICAL: Tell SQLAlchemy the JSON field was modified
     flag_modified(job, "answers")
     db.commit()
     db.refresh(job)
@@ -122,16 +143,11 @@ def _advance(db: Session, job: Job, answers: dict, next_step: str):
 
 
 def _dedupe(db: Session, job: Job, msg_id: str | None) -> bool:
-    """
-    Return True if this is a duplicate and should be ignored.
-    Commit immediately to prevent race conditions.
-    """
     if not msg_id:
         return False
     if job.last_msg_id == msg_id:
         logger.warning(f"[dedupe] Duplicate msg_id={msg_id}, ignoring.")
         return True
-
     job.last_msg_id = msg_id
     db.commit()
     logger.info(f"[dedupe] Marked msg_id={msg_id} as seen")
@@ -150,34 +166,23 @@ def _log_state(when: str, job: Job | None):
 
 
 def _generate_filename(job: Job) -> str:
-    """
-    Generate a user-friendly filename: "Name - Document Type.docx"
-    Example: "John Doe - Resume.docx", "Jane Smith - CV.docx"
-    """
     answers = job.answers or {}
     basics = answers.get('basics', {})
     name = basics.get('name', 'Document')
-    
-    # Clean name for filename (remove special characters)
     import re
     clean_name = re.sub(r'[<>:"/\\|?*]', '', name)
-    
-    # Map job types to display names
     doc_type_map = {
         'resume': 'Resume',
         'cv': 'CV',
         'cover': 'Cover Letter',
         'revamp': 'Revamp'
     }
-    
     doc_type = doc_type_map.get(job.type, job.type.capitalize())
     filename = f"{clean_name} - {doc_type}.docx"
-    
     return filename
 
 
 def _format_preview(answers: dict) -> str:
-    """Format a preview of all collected information for user review."""
     basics = answers.get("basics", {})
     target_role = answers.get("target_role", "")
     summary = answers.get("summary", "")
@@ -187,8 +192,6 @@ def _format_preview(answers: dict) -> str:
     projects = answers.get("projects", [])
 
     lines = ["📋 *Preview of Your Information*\n"]
-
-    # Basics
     lines.append("*Contact Details:*")
     lines.append(f"Name: {basics.get('name', 'N/A')}")
     if target_role:
@@ -198,19 +201,16 @@ def _format_preview(answers: dict) -> str:
     lines.append(f"Location: {basics.get('location', 'N/A')}")
     lines.append("")
 
-    # Summary (AI-generated)
     if summary:
         lines.append("*Professional Summary:* 🤖")
         lines.append(summary)
         lines.append("")
 
-    # Skills (AI-assisted)
     if skills:
         lines.append("*Skills:* 🤖")
         lines.append(", ".join(skills))
         lines.append("")
 
-    # Experiences
     if experiences:
         lines.append(f"*Work Experience:* ({len(experiences)} position{'s' if len(experiences) != 1 else ''})")
         for i, exp in enumerate(experiences, 1):
@@ -219,12 +219,10 @@ def _format_preview(answers: dict) -> str:
             lines.append(f"   ({len(bullets)} achievement{'s' if len(bullets) != 1 else ''})")
         lines.append("")
 
-    # Education
     if education:
         lines.append(f"*Education:* ({len(education)} entr{'ies' if len(education) != 1 else 'y'})")
         lines.append("")
 
-    # Projects
     if projects:
         lines.append(f"*Projects/Certifications:* ({len(projects)} item{'s' if len(projects) != 1 else ''})")
         lines.append("")
@@ -233,34 +231,28 @@ def _format_preview(answers: dict) -> str:
 
 
 async def convert_to_pdf(db: Session, user: User, telegram_user_id: str) -> str:
-    """
-    Trigger PDF conversion for the most recent .docx document.
-    The actual conversion is handled by send_pdf_to_user in webhook.py
-    
-    Args:
-        db: Database session
-        user: User object
-        telegram_user_id: Telegram user ID
-    
-    Returns:
-        Marker string to trigger PDF conversion and sending
-    """
-    # Check if user has PDF permission
-    if not payments.can_use_pdf(user):
-        return (f"🔒 *PDF Format is a Premium Feature*\n\n"
-                f"Upgrade to Premium to unlock:\n"
-                f"• Unlimited PDF conversions\n"
-                f"• 2 Resume + 2 CV per month\n"
-                f"• 1 Cover Letter\n"
-                f"• All premium features\n\n"
-                f"Type */upgrade* for just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month!")
-    
-    # Return marker with telegram_user_id for send_pdf_to_user
+    """Check most recent job's credit_type for PDF permission."""
+    last_job = (
+        db.query(Job)
+        .filter(Job.user_id == user.id, Job.status.in_(["done", "preview_ready", "completed"]))
+        .order_by(Job.created_at.desc())
+        .first()
+    )
+    if not last_job:
+        return "You don't have any documents yet. Create one first with /start!"
+
+    credit_type = (last_job.answers or {}).get("_credit_type", "free")
+    if not payments.can_use_pdf(user, credit_type):
+        return (
+            "🔒 *PDF Format — Paid Credits Only*\n\n"
+            "PDF conversion is available when you use a paid credit.\n\n"
+            "Free documents are delivered as DOCX only.\n\n"
+            "Type /buy\\_resume or /buy\\_bundle to purchase credits!"
+        )
     return f"__SEND_PDF__|{telegram_user_id}|placeholder"
 
 
 def _format_cover_preview(answers: dict) -> str:
-    """Format preview for cover letter data."""
     basics = answers.get("basics", {})
     role = answers.get("cover_role") or answers.get("target_role", "")
     company = answers.get("cover_company", "")
@@ -323,13 +315,20 @@ def _active_collecting_job(db: Session, user_id):
     )
 
 
+def _active_revising_job(db: Session, user_id):
+    return (
+        db.query(Job)
+        .filter(Job.user_id == user_id, Job.status == "revising")
+        .order_by(Job.created_at.desc())
+        .first()
+    )
+
+
 def _new_job(db: Session, user_id, doc_type: str) -> Job:
-    # Set initial step based on doc type
     if doc_type == "revamp":
         initial_step = "upload"
     else:
         initial_step = "basics"
-    
     job = Job(
         user_id=user_id,
         type=doc_type,
@@ -355,32 +354,13 @@ def get_active_job(db: Session, user_id, doc_type: str | None) -> Job | None:
     return _active_collecting_job(db, user_id)
 
 
-def maybe_finalize(db: Session, job: Job) -> bool:
-    ans = job.answers if isinstance(job.answers, dict) else {}
-    basics_ok = bool(ans.get("basics", {}).get("name"))
-    has_exp = len(ans.get("experiences", [])) >= 1
-    last_has_bullets = has_exp and len(ans["experiences"][-1].get("bullets", [])) >= 1
-
-    if basics_ok and last_has_bullets:
-        job.status = "draft_ready"
-        db.commit()
-        logger.info(f"[finalize] job.id={job.id} → draft_ready")
-        return True
-    return False
-
-
-async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free") -> str:
-    # Check quota reset and premium expiry FIRST
+async def handle_resume(db: Session, job: Job, text: str) -> str:
     user = db.query(User).filter(User.id == job.user_id).first()
-    payments.check_and_reset_quota(db, user)
-    payments.check_premium_expiry(db, user)
-    db.refresh(user)  # Refresh to get updated values
-    
     answers = job.answers or resume_flow.start_context()
     step = FORCE_LOWER(answers.get("_step") or "basics")
     t = (text or "").strip()
     t_lower = t.lower()
-    logger.info(f"[resume] step={step} text='{t[:80]}' tier={user.tier}")
+    logger.info(f"[resume] step={step} text='{t[:80]}'")
 
     # ---- BASICS ----
     if step == "basics":
@@ -390,6 +370,10 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         if "," not in t:
             return resume_flow.QUESTIONS["basics"]
 
+        is_valid, error_key = validate_basics(t)
+        if not is_valid:
+            return ERROR_MESSAGES.get(error_key, resume_flow.QUESTIONS["basics"])
+
         answers["basics"] = resume_flow.parse_basics(t)
         _advance(db, job, answers, "target_role")
         return resume_flow.QUESTIONS["target_role"]
@@ -398,14 +382,10 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
     if step == "target_role":
         if not t:
             return resume_flow.QUESTIONS["target_role"]
-
         answers["target_role"] = t.strip()
-
-        # Store target role in basics for document rendering
         if "basics" not in answers:
             answers["basics"] = {}
         answers["basics"]["title"] = t.strip()
-
         _advance(db, job, answers, "experience_header")
         return resume_flow.QUESTIONS["experiences"]
 
@@ -414,12 +394,10 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         if t.lower() == "skip":
             _advance(db, job, answers, "education")
             return resume_flow.QUESTIONS["education"]
-
         header = resume_flow.parse_experience_header(t)
         if not header.get("role"):
             return ("Please send: Role, Company, City, Start (MMM YYYY), "
                     "End (MMM YYYY or Present)")
-
         exps = list(answers.get("experiences", []))
         exps.append(header)
         answers["experiences"] = exps
@@ -435,18 +413,19 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         if not exps:
             _advance(db, job, answers, "experience_header")
             return resume_flow.QUESTIONS["experiences"]
-
         if lt == "done" or lt == "skip":
+            bullets = exps[-1].get("bullets", [])
+            is_valid, error_key = validate_experience_bullets(bullets)
+            if not is_valid:
+                return ERROR_MESSAGES.get(error_key, "Add at least 2 achievement bullets for this role.")
             _advance(db, job, answers, "add_another_experience")
             return "Add another experience? (Reply: yes / no)"
-
         if t:
             exps[-1]["bullets"].append(t.strip())
             answers["experiences"] = exps
             job.answers = answers
             flag_modified(job, "answers")
             db.commit()
-
         bullet_count = len(exps[-1].get("bullets", []))
         return f"Got it! ({bullet_count} bullet{'s' if bullet_count != 1 else ''} added)\n\nSend another bullet point or type *done* to continue."
 
@@ -456,7 +435,6 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         if lt in {"yes", "y", "add", "add another"}:
             _advance(db, job, answers, "experience_header")
             return resume_flow.QUESTIONS["experiences"]
-
         _advance(db, job, answers, "education")
         return resume_flow.QUESTIONS["education"]
 
@@ -467,13 +445,11 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
                 return "Please add at least one education entry, or type *skip* to continue."
             _advance(db, job, answers, "certifications")
             return resume_flow.QUESTIONS["certifications"]
-
         parsed = resume_flow.parse_education(t)
         if not parsed:
             return ("❌ *Invalid format!*\n\n"
                     "Please use: *Degree, School, Year*\n\n"
                     "*Example:* B.Sc. Computer Science, University of Lagos, 2020")
-
         edus = list(answers.get("education", []))
         edus.append(parsed)
         answers["education"] = edus
@@ -487,10 +463,8 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         if t_lower in {"done", "skip"}:
             _advance(db, job, answers, "profiles")
             return resume_flow.QUESTIONS["profiles"]
-        
         if not t:
             return resume_flow.QUESTIONS["certifications"]
-        
         certs = list(answers.get("certifications", []))
         certs.append({"details": t})
         answers["certifications"] = certs
@@ -504,10 +478,8 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
         if t_lower in {"done", "skip"}:
             _advance(db, job, answers, "projects")
             return resume_flow.QUESTIONS["projects"]
-        
         if not t:
             return resume_flow.QUESTIONS["profiles"]
-        
         parsed = resume_flow.parse_profile(t)
         if not parsed:
             return ("❌ *Invalid format!*\n\n"
@@ -515,7 +487,6 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
                     "*Examples:*\n"
                     "• LinkedIn, https://linkedin.com/in/yourname\n"
                     "• GitHub, https://github.com/yourname")
-        
         profiles = list(answers.get("profiles", []))
         profiles.append(parsed)
         answers["profiles"] = profiles
@@ -527,14 +498,11 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
     # ---- PROJECTS ----
     if step == "projects":
         if t_lower in {"done", "skip"}:
-            # Advance to skills
             _advance(db, job, answers, "skills")
             step = "skills"
-            # Fall through to skills below
         else:
             if not t:
                 return resume_flow.QUESTIONS["projects"]
-            
             projs = list(answers.get("projects", []))
             projs.append({"details": t})
             answers["projects"] = projs
@@ -545,77 +513,51 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
 
     # ---- SKILLS (AI-GENERATED WITH NUMBER SELECTION) ----
     if step == "skills":
-        # Wake words for skills generation
         SKILLS_WAKE_WORDS = {"continue", "ready", "show", "generate", "next", "proceed", "go"}
-        
-        # Check if AI skills were already generated
         ai_skills = answers.get("ai_suggested_skills", [])
-        
+
         if not ai_skills:
-            # If user sent a wake word but skills not generated yet, show waiting message
             if t_lower in SKILLS_WAKE_WORDS:
                 return ("⏳ *Generating skill suggestions...*\n\n"
                         "AI is analyzing your role and experience to suggest relevant skills.\n"
                         "This usually takes 3-5 seconds.\n\n"
                         "Type *continue* when ready to see them!")
-            
-            # Generate AI skills on first entry
             try:
                 target_role = answers.get("target_role", "")
                 experiences = answers.get("experiences", [])
                 basics = answers.get("basics", {})
-                
                 logger.info(f"[skills] Starting AI skills generation for job {job.id}")
-
-                # Generate 5-8 skill suggestions
-                suggested_skills = ai.generate_skills(target_role, basics, experiences, tier=user_tier)
-                suggested_skills = suggested_skills[:8]  # Limit to 8
-
-                # Store in answers
+                suggested_skills = ai.generate_skills(target_role, basics, experiences)
+                suggested_skills = suggested_skills[:8]
                 answers["ai_suggested_skills"] = suggested_skills
                 job.answers = answers
                 flag_modified(job, "answers")
                 db.commit()
-                
                 logger.info(f"[skills] AI skills generated successfully for job {job.id}")
-
-                # Return formatted selection menu
                 return resume_flow.format_skills_selection(suggested_skills)
-                
             except Exception as e:
                 logger.error(f"[skills] AI generation failed: {e}")
-                # Fallback to manual entry
                 return ("⚠️ AI skills generation unavailable.\n\n"
                         "💡 *List your top 5-8 skills* (comma-separated)\n\n"
                         "*Example:* Python, Data Analysis, SQL, Communication")
-        
-        # User is selecting from AI skills
+
         if not t or t_lower in SKILLS_WAKE_WORDS:
-            # Show the skills again (wake words trigger re-display)
             return resume_flow.format_skills_selection(ai_skills)
-        
-        # Parse user selection (numbers or custom skills)
+
         selected_skills = resume_flow.parse_skill_selection(t, ai_skills)
-        
         if not selected_skills or len(selected_skills) < 3:
             return ("❌ *Invalid selection!*\n\n"
                     "Please enter skill numbers (comma-separated):\n"
                     "*Example:* 1,3,5,7\n\n"
                     "Or type your own skills (comma-separated).\n"
                     "Need at least 3 skills.")
-        
         answers["skills"] = selected_skills
         _advance(db, job, answers, "personal_info")
-        
-        # Move to personal_info before generating summary
         return resume_flow.QUESTIONS["personal_info"]
 
     # ---- SUMMARY (AI-GENERATED, REQUIRED) ----
     if step == "summary":
-        # Wake words to trigger showing already-generated summary
         WAKE_WORDS = {"continue", "ready", "show", "generate", "next", "proceed", "go", "ok"}
-        
-        # Handle skip - user wants to write their own summary
         if t_lower == "skip":
             return ("✍️ *Write Your Own Summary*\n\n"
                     "Please write a 2-3 sentence professional summary about yourself.\n\n"
@@ -623,83 +565,63 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
                     "Senior Data Analyst with 5+ years of experience in financial modeling and business intelligence. "
                     "Proven track record of delivering actionable insights that drive strategic decisions. "
                     "Expert in Python, SQL, and data visualization tools.")
-        
-        # Check if summary was already generated
+
         if not answers.get("summary"):
-            # If user sent a wake word, generate AI summary NOW
             if t_lower in WAKE_WORDS:
                 logger.info(f"[summary] User triggered AI generation with wake word: {t_lower}")
-                
                 try:
-                    # Generate AI summary immediately
                     logger.info(f"[summary] Starting AI summary generation for job {job.id}")
-                    
-                    summary = ai.generate_summary(answers, tier=user_tier)
+                    summary = ai.generate_summary(answers)
                     answers["summary"] = summary
                     job.answers = answers
                     flag_modified(job, "answers")
                     db.commit()
-                    
                     logger.info(f"[summary] AI summary generated successfully for job {job.id}")
-
                     return (f"✨ *AI-Generated Professional Summary:*\n\n"
                             f"{summary}\n\n"
                             f"━━━━━━━━━━━━━━━━\n\n"
                             f"✅ Happy with this? Type *yes* to continue.\n"
                             f"📝 Or send your own summary to replace it.\n"
                             f"🔄 Type *continue* to see it again.")
-                    
                 except Exception as e:
                     logger.error(f"[summary] AI generation failed: {e}")
                     return ("⚠️ AI summary generation unavailable.\n\n"
                             "Please write a 2-3 sentence professional summary:\n\n"
                             "*Example:* Data Analyst with 5+ years building dashboards.")
-            
-            # User sent something else (not a wake word) - treat as custom summary
+
             if t and t_lower not in WAKE_WORDS:
-                # User is writing their own summary
                 answers["summary"] = t
                 job.answers = answers
                 flag_modified(job, "answers")
                 db.commit()
-                
-                # Move to preview
                 _advance(db, job, answers, "preview")
                 preview_text = _format_preview(answers)
                 return f"{preview_text}\n\n✅ Reply *yes* to generate your document or */reset* to start over!"
-            
-            # No input yet - wait for wake word or custom summary
+
             return ("⏳ *Ready to generate your AI summary!*\n\n"
                     "Type *continue* to start AI generation, or *skip* to write your own.")
-        
-        # Summary already exists - check for wake words
-        if t_lower in WAKE_WORDS and not t_lower in {"yes", "y", "ok", "okay", "good", "done"}:
-            # Show the already-generated summary
+
+        if t_lower in WAKE_WORDS and t_lower not in {"yes", "y", "ok", "okay", "good", "done"}:
             return (f"✨ *Your AI-Generated Professional Summary:*\n\n"
                     f"{answers['summary']}\n\n"
                     f"━━━━━━━━━━━━━━━━\n\n"
                     f"✅ Happy with this? Type *yes* to continue.\n"
                     f"📝 Or send your own summary to replace it.")
-        
-        # User can edit the summary or accept it
+
         if t_lower in {"yes", "y", "ok", "okay", "good", "done"}:
-            # Accept the AI-generated summary
             pass
         elif t:
-            # User provided their own summary
             answers["summary"] = t
             job.answers = answers
             flag_modified(job, "answers")
             db.commit()
         else:
-            # No input - show the generated summary again
             return (f"✨ *Your Professional Summary:*\n\n"
                     f"{answers['summary']}\n\n"
                     f"━━━━━━━━━━━━━━━━\n\n"
                     f"Type *yes* to accept, or send your own summary.\n"
                     f"Or type *continue* to see it again.")
 
-        # Move to preview/review
         _advance(db, job, answers, "preview")
         preview_text = _format_preview(answers)
         return f"{preview_text}\n\n✅ Reply *yes* to generate your document or */reset* to start over!"
@@ -708,17 +630,12 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
     if step == "personal_info":
         if not t:
             return resume_flow.QUESTIONS["personal_info"]
-        
         if t_lower not in {"skip"}:
             answers["personal_traits"] = t
             job.answers = answers
             flag_modified(job, "answers")
             db.commit()
-        
-        # Move to summary generation (using personal_info)
         _advance(db, job, answers, "summary")
-        
-        # Return clear instructions for AI summary generation
         return ("🤖 *AI Summary Generation Ready*\n\n"
                 "I'm about to craft your professional summary using AI based on:\n"
                 "• Your target role\n"
@@ -732,149 +649,40 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
 
     # ---- PREVIEW ----
     if step == "preview":
-        # If user just arrived at preview, show summary
         if not t or t.lower() in {"done", "skip"}:
             preview_text = _format_preview(answers)
             return f"{preview_text}\n\nLooks good? Reply *yes* to generate your document, or */reset* to start over."
-
-        # User confirmed
         if t.lower() in {"yes", "y", "confirm", "ok", "okay"}:
-            # Check if premium user - offer template selection
-            user = db.query(User).filter(User.id == job.user_id).first()
-            if user and user.tier != "free":
-                # Premium users get to choose template
-                _advance(db, job, answers, "template_selection")
-                return "__SHOW_TEMPLATE_MENU__"
-            else:
-                # Free users get default template 1
-                answers["template"] = "template_1"
+            answers["template"] = answers.get("template", "template_1")
             _advance(db, job, answers, "finalize")
             step = "finalize"
-            # Fall through to finalization
         else:
-            # User wants to make changes
             return ("To make changes, please type */reset* to start over.\n\n"
                     "Or reply *yes* to proceed with generating your document.")
 
     # ---- TEMPLATE SELECTION (handled via callback, but add safety) ----
     if step == "template_selection":
-        # This step is handled via inline keyboard callback
-        # If user somehow sends a text message, guide them
         return ("Please click one of the template buttons above to continue.\n\n"
                 "Or type */reset* to start over.")
 
-    # ---- PAYMENT REQUIRED ----
-    if step == "payment_required":
-        # User needs to pay before generating
-        if t.lower() == "pay":
-            user = db.query(User).filter(User.id == job.user_id).first()
-            target_role = answers.get("target_role", "Unknown Role")
-
-            # Create payment link
-            payment_result = await payments.create_payment_link(user, target_role)
-
-            if "error" in payment_result:
-                return ("❌ Sorry, we couldn't create your payment link. Please try again later or contact support.\n\n"
-                        "Support: 07063011079")
-
-            # Store payment reference in job for tracking
-            answers["payment_reference"] = payment_result.get("reference")
-            job.answers = answers
-            flag_modified(job, "answers")
-            db.commit()
-
-            return (f"💳 *Payment Link Created*\n\n"
-                    f"Amount: ₦{payments.PAID_GENERATION_PRICE:,}\n\n"
-                    f"Click here to pay: {payment_result.get('authorization_url')}\n\n"
-                    "After payment, return here and type *paid* to continue.")
-
-        if t.lower() == "paid":
-            # Gateway waived: mark as paid and continue
-            user = db.query(User).filter(User.id == job.user_id).first()
-            payments.record_waived_payment(db, user.id, answers.get("target_role", "Unknown Role"))
-
-            answers.pop("payment_reference", None)
-            answers["paid_generation"] = True
-            _advance(db, job, answers, "finalize")
-
-            step = "finalize"
-            t = ""  # Reset text to proceed with finalization
-
-        else:
-            return (f"🎯 *Payment Required*\n\n"
-                    f"Each document costs ₦{payments.PAID_GENERATION_PRICE:,}.\n\n"
-                    "Reply *pay* to get your payment link, or type */reset* to cancel.")
-
     # ---- FINALIZE ----
     if step == "finalize":
-        # Check if user wants to pay
-        if t.lower() == "pay":
-            user = db.query(User).filter(User.id == job.user_id).first()
-            target_role = answers.get("target_role", "Unknown Role")
-
-            # Create payment link
-            payment_result = await payments.create_payment_link(user, target_role)
-
-            if "error" in payment_result:
-                return ("❌ Sorry, we couldn't create your payment link. Please try again later or contact support.\n\n"
-                        "Support: 07063011079")
-
-            # Store payment reference in job for tracking
-            answers["payment_reference"] = payment_result.get("reference")
-            job.answers = answers
-            flag_modified(job, "answers")
-            db.commit()
-
-            return (f"💳 *Payment Link Created*\n\n"
-                    f"Amount: ₦{payments.PAID_GENERATION_PRICE:,}\n\n"
-                    f"Click here to pay: {payment_result.get('authorization_url')}\n\n"
-                    "After payment, return here and type *paid* to continue.")
-
-        # Check if user claims to have paid
-        if t.lower() == "paid":
-            # Gateway waived: mark as paid and continue
-            user = db.query(User).filter(User.id == job.user_id).first()
-            payments.record_waived_payment(db, user.id, target_role)
-
-            answers.pop("payment_reference", None)
-            answers["paid_generation"] = True
-            job.answers = answers
-            flag_modified(job, "answers")
-            db.commit()
-
-            t = ""
-
-        # Check generation limits before proceeding
-        user = db.query(User).filter(User.id == job.user_id).first()
         doc_type = "cv" if job.type == "cv" else "resume"
 
-        can_gen, reason = payments.can_generate_document(user, doc_type)
+        # Gate: check credit availability
+        if not payments.can_generate(user, doc_type):
+            return payments.get_purchase_prompt(doc_type)
 
-        if not can_gen:
-            if reason.startswith("quota_exceeded"):
-                _, doc_name, limit = reason.split("|")
-                
-                # Show upgrade message
-                return (f"📊 *{doc_name.upper()} Quota Reached*\n\n"
-                        f"You've used all {limit} {doc_name}{'s' if int(limit) > 1 else ''} in your {user.tier} plan.\n\n"
-                        f"💡 *Upgrade to Premium for:*\n"
-                        f"• More documents (2 Resume + 2 CV)\n"
-                        f"• 1 Cover Letter\n"
-                        f"• PDF format\n"
-                        f"• All features unlocked\n\n"
-                        f"Type */upgrade* to get Premium for just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month!")
-            
-            elif reason.startswith("document_not_allowed"):
-                return (f"❌ *This document type requires Premium*\n\n"
-                        f"Type */upgrade* to unlock all document types!")
+        # Consume credit
+        try:
+            credit_type = payments.consume_credit(user, doc_type, db)
+        except ValueError:
+            return payments.get_purchase_prompt(doc_type)
 
-        # Track the generation
-        payments.update_document_count(db, user, doc_type)
+        answers["_credit_type"] = credit_type
 
-        # Note: AI enhancement already applied during flow (skills and summary generation)
-        logger.info(f"[handle_resume] Finalizing job.id={job.id}")
+        logger.info(f"[handle_resume] Finalizing job.id={job.id} credit_type={credit_type}")
 
-        # Render document
         try:
             logger.info(f"[handle_resume] Rendering document for job.id={job.id}")
             if job.type == "cv":
@@ -882,12 +690,9 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
             else:
                 doc_bytes = renderer.render_resume(job)
 
-            # Save file locally with user-friendly name
             filename = _generate_filename(job)
             file_path = storage.save_file_locally(job.id, doc_bytes, filename)
 
-            # Store document temporarily for sending via Telegram
-            # We'll use draft_text to store the file path
             job.draft_text = file_path
             job.status = "preview_ready"
             db.commit()
@@ -895,55 +700,45 @@ async def handle_resume(db: Session, job: Job, text: str, user_tier: str = "free
 
         except Exception as e:
             logger.error(f"[handle_resume] Document rendering failed: {e}")
-            job.status = "draft_ready"
+            job.status = "render_failed"
             job.draft_text = f"Error: {str(e)}"
             db.commit()
             _advance(db, job, job.answers, "done")
-            return f"❌ Sorry, document generation failed: {str(e)}"
+            telegram_id = user.telegram_user_id
+            if telegram_id:
+                await handle_error(
+                    ErrorType.RENDER_FAILURE,
+                    telegram_id,
+                    "docx_render_failed",
+                    context={"doc_type": job.type or "document"},
+                    exception=e,
+                )
+            return ""
 
         _advance(db, job, job.answers, "done")
-        # Return special marker to trigger document sending
         return f"__SEND_DOCUMENT__|{job.id}|{filename}"
 
     # ---- DONE ----
     if step == "done":
-        # Job is complete, prompt user to start a new one
         return "Your document has been sent! Reply */reset* to create another document, or *menu* to see options."
 
-    # Safety: never fall back; re-ask current step
     return resume_flow.QUESTIONS.get(step, resume_flow.QUESTIONS["basics"])
 
 
-async def handle_revamp(db: Session, job: Job, text: str, user_tier: str = "free") -> str:
-    """
-    Handle resume/CV revamp flow.
-    User uploads their existing resume file (DOCX/PDF) and AI improves it.
-    """
-    # Check quota reset and premium expiry FIRST
+async def handle_revamp(db: Session, job: Job, text: str) -> str:
     user = db.query(User).filter(User.id == job.user_id).first()
-    payments.check_and_reset_quota(db, user)
-    payments.check_premium_expiry(db, user)
-    db.refresh(user)  # Refresh to get updated values
-    
     answers = job.answers or {"_step": "upload"}
     step = FORCE_LOWER(answers.get("_step") or "upload")
     t = (text or "").strip()
-    logger.info(f"[revamp] step={step} text_len={len(t)} tier={user.tier}")
+    logger.info(f"[revamp] step={step} text_len={len(t)}")
 
     # ---- UPLOAD ----
     if step == "upload":
-        # Show upload instructions
         if not t or t.lower() in {"revamp", "revamp existing", "revamp existing (soon)"}:
             upload_msg = "📄 *Resume/CV Revamp*\n\n"
             upload_msg += "I'll help improve your existing resume or CV with AI-powered enhancements!\n\n"
             upload_msg += "*📤 Upload Your Resume:*\n"
-            
-            if user_tier == "pro":
-                upload_msg += "✅ Supported formats: .docx, .pdf\n"
-            else:
-                upload_msg += "✅ Supported format: .docx\n"
-                upload_msg += "💡 Upgrade to Premium for PDF support\n"
-            
+            upload_msg += "✅ Supported format: .docx\n"
             upload_msg += "\n*How It Works:*\n"
             upload_msg += "1. Tap the 📎 attachment icon\n"
             upload_msg += "2. Select your resume file\n"
@@ -951,10 +746,8 @@ async def handle_revamp(db: Session, job: Job, text: str, user_tier: str = "free
             upload_msg += "4. I'll analyze and improve it with AI\n"
             upload_msg += "5. You'll get a professionally revamped version!\n\n"
             upload_msg += "_Maximum file size: 10MB_"
-            
             return upload_msg
 
-        # User sent text instead of uploading
         return ("📎 *Please upload your resume file*\n\n"
                 "I need you to upload your existing resume as a file (not paste text).\n\n"
                 "*Steps:*\n"
@@ -965,25 +758,18 @@ async def handle_revamp(db: Session, job: Job, text: str, user_tier: str = "free
 
     # ---- REVAMP PROCESSING ----
     if step == "revamp_processing":
-        # Call AI to revamp the content
         original = answers.get("original_content", "")
-
         try:
-            from app.services import ai
-            revamped_content = ai.revamp_resume(original, tier=user_tier)
-
+            revamped_content = ai.revamp_resume(original)
             answers["revamped_content"] = revamped_content
             _advance(db, job, answers, "preview")
-
             preview = f"""🎯 *AI-Enhanced Resume*
 
 {revamped_content[:500]}{'...' if len(revamped_content) > 500 else ''}
 
 ---
 Reply *yes* to generate your improved document, or */reset* to start over."""
-
             return preview
-
         except Exception as e:
             logger.error(f"[revamp] AI revamp failed: {e}")
             return ("❌ Sorry, we couldn't process your resume. Please try again or contact support.\n\n"
@@ -992,136 +778,45 @@ Reply *yes* to generate your improved document, or */reset* to start over."""
     # ---- PREVIEW ----
     if step == "preview":
         if t.lower() in {"yes", "y", "confirm", "ok"}:
-            # Check generation limits
-            user = db.query(User).filter(User.id == job.user_id).first()
-            can_gen, reason = payments.can_generate_document(user, "revamp")
-            if not can_gen:
-                if reason.startswith("quota_exceeded"):
-                    _, doc_name, limit = reason.split("|")
-                    
-                    return (f"📊 *Revamp Quota Reached*\n\n"
-                            f"You've used all {limit} revamp{'s' if int(limit) > 1 else ''} in your {user.tier} plan.\n\n"
-                            f"💡 *Upgrade to Premium for:*\n"
-                            f"• More documents\n"
-                            f"• PDF format\n"
-                            f"• All features unlocked\n\n"
-                            f"Type */upgrade* to get Premium for just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month!")
-                
-                elif reason.startswith("document_not_allowed"):
-                    return (f"❌ *Revamp requires Premium*\n\n"
-                            f"Type */upgrade* to unlock all features!")
-
-            # Track generation
-            payments.update_document_count(db, user, "revamp")
+            doc_type = "resume"
+            if not payments.can_generate(user, doc_type):
+                return payments.get_purchase_prompt(doc_type)
+            try:
+                credit_type = payments.consume_credit(user, doc_type, db)
+            except ValueError:
+                return payments.get_purchase_prompt(doc_type)
+            answers["_credit_type"] = credit_type
 
             try:
-                # Render revamped document
                 logger.info(f"[revamp] Rendering revamped document for job.id={job.id}")
                 doc_bytes = renderer.render_revamp(job)
                 filename = _generate_filename(job)
                 file_path = storage.save_file_locally(job.id, doc_bytes, filename)
-
                 job.draft_text = file_path
                 job.status = "preview_ready"
                 db.commit()
-
                 _advance(db, job, answers, "done")
                 return f"__SEND_DOCUMENT__|{job.id}|{filename}"
             except Exception as e:
                 logger.error(f"[revamp] Rendering failed: {e}")
                 _advance(db, job, answers, "done")
                 return f"❌ Sorry, document generation failed: {str(e)}"
-
         return "Reply *yes* to generate your document, or */reset* to start over."
 
-    # ---- PAYMENT REQUIRED (REVAMP) ----
-    if step == "payment_required":
-        # Check if user is now premium (may have upgraded since reaching this step)
-        user = db.query(User).filter(User.id == job.user_id).first()
-        
-        if user and user.tier == "pro":
-            # User is premium now - bypass payment and proceed to generation
-            logger.info(f"[revamp] User {user.id} is premium, bypassing payment for revamp")
-            answers.pop("payment_reference", None)
-            answers["paid_generation"] = True
-            
-            # Track generation
-            target_role = answers.get("target_role", "Revamp")
-            payments.update_generation_count(db, user, target_role)
-            
-            try:
-                # Render revamped document
-                logger.info(f"[revamp] Rendering revamped document for job.id={job.id}")
-                doc_bytes = renderer.render_revamp(job)
-                filename = _generate_filename(job)
-                file_path = storage.save_file_locally(job.id, doc_bytes, filename)
-
-                job.draft_text = file_path
-                job.status = "preview_ready"
-                db.commit()
-
-                _advance(db, job, answers, "done")
-                return f"__SEND_DOCUMENT__|{job.id}|{filename}"
-            except Exception as e:
-                logger.error(f"[revamp] Rendering failed: {e}")
-                _advance(db, job, answers, "done")
-                return f"❌ Sorry, document generation failed: {str(e)}"
-        
-        # User is still free tier - handle payment
-        if t.lower() == "pay":
-            target_role = answers.get("target_role", "Revamp")
-
-            payment_result = await payments.create_payment_link(user, target_role)
-            if "error" in payment_result:
-                return ("❌ Sorry, we couldn't create your payment link. Please try again later or contact support.\n\n"
-                        "Support: 07063011079")
-
-            answers["payment_reference"] = payment_result.get("reference")
-            job.answers = answers
-            flag_modified(job, "answers")
-            db.commit()
-
-            return (f"💳 *Payment Link Created*\n\n"
-                    f"Amount: ₦{payments.PAID_GENERATION_PRICE:,}\n\n"
-                    f"Click here to pay: {payment_result.get('authorization_url')}\n\n"
-                    "After payment, return here and type *paid* to continue.")
-
-        if t.lower() == "paid":
-            # Waive payment for now
-            payments.record_waived_payment(db, user.id, answers.get("target_role", "Revamp"))
-
-            answers.pop("payment_reference", None)
-            answers["paid_generation"] = True
-            _advance(db, job, answers, "preview")
-            return "✅ Payment waived! Reply *yes* to generate your improved document."
-
-        return (f"🎯 *Payment Required*\n\nEach document costs ₦{payments.PAID_GENERATION_PRICE:,}.\n"
-                "Reply *pay* to get your payment link, or */reset* to cancel.")
+    return resume_flow.QUESTIONS.get(step, resume_flow.QUESTIONS["basics"])
 
 
-async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free") -> str:
-    """
-    Professional cover letter flow matching HR template.
-    Steps: basics -> role_company -> experience_overview -> interest_reason -> 
-           current_role -> achievement_1 -> achievement_2 -> key_skills -> 
-           company_goal -> preview -> finalize
-    """
-    # Check quota reset and premium expiry FIRST
+async def handle_cover(db: Session, job: Job, text: str) -> str:
     user = db.query(User).filter(User.id == job.user_id).first()
-    payments.check_and_reset_quota(db, user)
-    payments.check_premium_expiry(db, user)
-    db.refresh(user)  # Refresh to get updated values
-    
     answers = job.answers or {"_step": "basics"}
     step = FORCE_LOWER(answers.get("_step") or "basics")
     t = (text or "").strip()
-    logger.info(f"[cover] step={step} text_len={len(t)} tier={user.tier}")
+    logger.info(f"[cover] step={step} text_len={len(t)}")
 
     # BASICS
     if step == "basics":
         if "," not in t:
             return resume_flow.QUESTIONS["basics"]
-
         answers["basics"] = resume_flow.parse_basics(t)
         _advance(db, job, answers, "role_company")
         return ("Great! Now tell me the role and company you're applying to.\n"
@@ -1133,11 +828,9 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
         parts = [p.strip() for p in t.split(",")]
         if len(parts) < 2:
             return "Please send: Position Title, Company Name\n\nExample: Senior HR Manager, Google"
-
         answers["cover_role"] = parts[0]
         answers["cover_company"] = parts[1]
         answers["target_role"] = parts[0]
-
         _advance(db, job, answers, "experience_overview")
         return ("How many years of experience do you have in this field, and which industries?\n\n"
                 "Format: [Years], [Industry/Industries]\n\n"
@@ -1148,10 +841,8 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
         parts = [p.strip() for p in t.split(",", 1)]
         if len(parts) < 2:
             return "Please send: Years of experience, Industry\n\nExample: 15 years, HR and Talent Management"
-        
         answers["years_experience"] = parts[0]
         answers["industries"] = parts[1]
-        
         _advance(db, job, answers, "interest_reason")
         return ("Why are you interested in this specific role or company?\n\n"
                 "Example: I'm excited about your company's commitment to employee development and innovative HR practices")
@@ -1160,7 +851,6 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
     if step == "interest_reason":
         if not t:
             return "Please share why you're interested in this role or company."
-        
         answers["interest_reason"] = t
         _advance(db, job, answers, "current_role")
         return ("What is your current (or most recent) job title and employer?\n\n"
@@ -1172,10 +862,8 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
         parts = [p.strip() for p in t.split(",", 1)]
         if len(parts) < 2:
             return "Please send: Job Title, Employer\n\nExample: HR Director, Microsoft"
-        
         answers["current_title"] = parts[0]
         answers["current_employer"] = parts[1]
-        
         _advance(db, job, answers, "achievement_1")
         return ("Describe a key achievement or responsibility with quantified results.\n\n"
                 "Include:\n"
@@ -1187,7 +875,6 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
     if step == "achievement_1":
         if not t:
             return "Please share a key achievement with quantified results."
-        
         answers["achievement_1"] = t
         _advance(db, job, answers, "achievement_2")
         return ("Share another key achievement (optional).\n\n"
@@ -1198,7 +885,6 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
     if step == "achievement_2":
         if t.lower() not in {"skip", "done"}:
             answers["achievement_2"] = t
-        
         _advance(db, job, answers, "key_skills")
         return ("List 3-5 key skills most relevant to this role (separated by commas).\n\n"
                 "Example: HRIS implementation, performance management, compensation benchmarking, employee relations, DEI initiatives")
@@ -1207,10 +893,8 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
     if step == "key_skills":
         if not t:
             return "Please list 3-5 key skills separated by commas."
-        
         skills_list = [s.strip() for s in t.split(",")]
         answers["cover_key_skills"] = skills_list
-        
         _advance(db, job, answers, "company_goal")
         return (f"What specific goal or objective at {answers.get('cover_company', 'the company')} do you want to support?\n\n"
                 "Example: Building a more diverse and inclusive workplace culture")
@@ -1219,9 +903,7 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
     if step == "company_goal":
         if not t:
             return "Please share what company goal you want to support."
-        
         answers["company_goal"] = t
-        
         _advance(db, job, answers, "preview")
         preview_text = _format_cover_preview(answers)
         return f"{preview_text}\n\nLooks good? Reply *yes* to generate your cover letter, or */reset* to start over."
@@ -1229,133 +911,60 @@ async def handle_cover(db: Session, job: Job, text: str, user_tier: str = "free"
     # PREVIEW
     if step == "preview":
         if t.lower() in {"yes", "y", "confirm", "ok"}:
-            user = db.query(User).filter(User.id == job.user_id).first()
-            can_gen, reason = payments.can_generate_document(user, "cover_letter")
-            if not can_gen:
-                if reason.startswith("quota_exceeded"):
-                    return (f"📊 *Cover Letter Quota Reached*\n\n"
-                            f"You've used all cover letters in your {user.tier} plan.\n\n"
-                            f"💡 *Upgrade to Premium for:*\n"
-                            f"• 1 Cover Letter per month\n"
-                            f"• More documents\n"
-                            f"• PDF format\n\n"
-                            f"Type */upgrade* to get Premium for just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month!")
-                
-                elif reason.startswith("document_not_allowed"):
-                    return (f"❌ *Cover Letters require Premium*\n\n"
-                            f"Upgrade to Premium and get:\n"
-                            f"• 1 Cover Letter per month\n"
-                            f"• 2 Resume + 2 CV\n"
-                            f"• PDF format\n\n"
-                            f"Type */upgrade* for just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month!")
-
-            payments.update_document_count(db, user, "cover_letter")
+            doc_type = "cover"
+            if not payments.can_generate(user, doc_type):
+                return payments.get_purchase_prompt(doc_type)
+            try:
+                credit_type = payments.consume_credit(user, doc_type, db)
+            except ValueError:
+                return payments.get_purchase_prompt(doc_type)
+            answers["_credit_type"] = credit_type
 
             try:
                 logger.info(f"[cover] Rendering cover letter for job.id={job.id}")
                 doc_bytes = renderer.render_cover_letter(job)
                 filename = _generate_filename(job)
                 file_path = storage.save_file_locally(job.id, doc_bytes, filename)
-
                 job.draft_text = file_path
                 job.status = "preview_ready"
                 db.commit()
-
                 _advance(db, job, answers, "done")
                 return f"__SEND_DOCUMENT__|{job.id}|{filename}"
             except Exception as e:
                 logger.error(f"[cover] Rendering failed: {e}")
+                job.status = "render_failed"
+                job.draft_text = f"Error: {str(e)}"
+                db.commit()
                 _advance(db, job, answers, "done")
-                return f"❌ Sorry, cover letter generation failed: {str(e)}"
+                if user and user.telegram_user_id:
+                    await handle_error(
+                        ErrorType.RENDER_FAILURE,
+                        user.telegram_user_id,
+                        "docx_render_failed",
+                        context={"doc_type": "cover letter"},
+                        exception=e,
+                    )
+                return ""
 
         preview_text = _format_cover_preview(answers)
         return f"{preview_text}\n\nLooks good? Reply *yes* to generate your cover letter, or */reset* to start over."
 
-    # PAYMENT REQUIRED
-    if step == "payment_required":
-        # Check if user is now premium (may have upgraded since reaching this step)
-        user = db.query(User).filter(User.id == job.user_id).first()
-        
-        if user and user.tier == "pro":
-            # User is premium now - bypass payment and proceed to generation
-            logger.info(f"[cover] User {user.id} is premium, bypassing payment for cover letter")
-            answers.pop("payment_reference", None)
-            answers["paid_generation"] = True
-            
-            # Track generation
-            target_role = answers.get("cover_role", "Cover Letter")
-            payments.update_generation_count(db, user, target_role)
-            
-            try:
-                logger.info(f"[cover] Rendering cover letter for job.id={job.id}")
-                doc_bytes = renderer.render_cover_letter(job)
-                filename = _generate_filename(job)
-                file_path = storage.save_file_locally(job.id, doc_bytes, filename)
-
-                job.draft_text = file_path
-                job.status = "preview_ready"
-                db.commit()
-
-                _advance(db, job, answers, "done")
-                return f"__SEND_DOCUMENT__|{job.id}|{filename}"
-            except Exception as e:
-                logger.error(f"[cover] Rendering failed: {e}")
-                _advance(db, job, answers, "done")
-                return f"❌ Sorry, cover letter generation failed: {str(e)}"
-        
-        # User is still free tier - handle payment
-        if t.lower() == "pay":
-            target_role = answers.get("cover_role", "Cover Letter")
-
-            payment_result = await payments.create_payment_link(user, target_role)
-            if "error" in payment_result:
-                return ("❌ Sorry, we couldn't create your payment link. Please try again later or contact support.\n\n"
-                        "Support: 07063011079")
-
-            answers["payment_reference"] = payment_result.get("reference")
-            job.answers = answers
-            flag_modified(job, "answers")
-            db.commit()
-
-            return (f"💳 *Payment Link Created*\n\n"
-                    f"Amount: ₦{payments.PAID_GENERATION_PRICE:,}\n\n"
-                    f"Click here to pay: {payment_result.get('authorization_url')}\n\n"
-                    "After payment, return here and type *paid* to continue.")
-
-        if t.lower() == "paid":
-            # Waive payment for now
-            payments.record_waived_payment(db, user.id, answers.get("cover_role", "Cover Letter"))
-
-            answers.pop("payment_reference", None)
-            answers["paid_generation"] = True
-            _advance(db, job, answers, "preview")
-            preview_text = _format_cover_preview(answers)
-            return f"✅ Payment waived!\n\n{preview_text}\n\nReply *yes* to generate your cover letter."
-
-        return (f"🎯 *Payment Required*\n\nEach document costs ₦{payments.PAID_GENERATION_PRICE:,}.\n"
-                "Reply *pay* to get your payment link, or */reset* to cancel.")
-
     return resume_flow.QUESTIONS.get(step, resume_flow.QUESTIONS["basics"])
-
-    return "Something went wrong. Please type */reset* to start over."
 
 
 async def get_admin_stats(db: Session) -> str:
-    """Get comprehensive bot statistics for admin using analytics service."""
     from app.services import analytics
     from datetime import datetime
-    
-    # Get comprehensive analytics
+
     stats = analytics.get_system_analytics(db, days=7)
-    
     if 'error' in stats:
         return f"❌ Error generating stats: {stats['error']}"
-    
+
     users = stats['users']
     docs = stats['documents']
-    payments = stats['payments']
+    pay = stats['payments']
     engagement = stats['engagement']
-    
+
     stats_msg = f"""📊 *Career Buddy - Analytics Dashboard*
 _Last 7 days overview_
 
@@ -1363,8 +972,7 @@ _Last 7 days overview_
 • Total Users: {users['total']}
 • New Users: {users['new']}
 • Active Users: {users['active']}
-• Premium: {users['premium']} ({users['premium_percentage']}%)
-• Free: {users['free']}
+• With Credits: {users.get('paid', 0)}
 
 *📄 DOCUMENT METRICS*
 • Total Generated: {docs['total']}
@@ -1378,9 +986,9 @@ _By Type:_
 • ✨ Revamps: {docs['revamps']}
 
 *💰 REVENUE METRICS*
-• Transactions: {payments['total_transactions']}
-• Revenue: ₦{payments['total_revenue']:,.0f}
-• Avg Transaction: ₦{payments['avg_transaction']:,.0f}
+• Transactions: {pay['total_transactions']}
+• Revenue: ₦{pay['total_revenue']:,.0f}
+• Avg Transaction: ₦{pay['avg_transaction']:,.0f}
 
 *💬 ENGAGEMENT*
 • Total Messages: {engagement['total_messages']}
@@ -1388,238 +996,109 @@ _By Type:_
 • Avg per User: {engagement['avg_messages_per_user']}
 
 """
-    
-    # Add top users
+
     if stats.get('top_users'):
         stats_msg += "*🏆 TOP USERS*\n"
-        for user in stats['top_users'][:3]:
-            tier_emoji = "⭐" if user['tier'] == "pro" else "🆓"
-            stats_msg += f"{tier_emoji} {user['username']}: {user['documents']} docs\n"
+        for u in stats['top_users'][:3]:
+            stats_msg += f"• {u['username']}: {u['documents']} docs\n"
         stats_msg += "\n"
-    
+
     stats_msg += f"_Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC_"
-    
     return stats_msg
 
 
 async def broadcast_message(db: Session, message: str, sender_id: str) -> str:
-    """Broadcast a message to all users."""
     from app.services import telegram
-    
     all_users = db.query(User).all()
     success_count = 0
     fail_count = 0
-    
     broadcast_text = f"""📢 *Announcement from Career Buddy*
 
 {message}"""
-    
-    for user in all_users:
+    for u in all_users:
         try:
-            await telegram.reply_text(user.telegram_user_id, broadcast_text)
+            await telegram.reply_text(u.telegram_user_id, broadcast_text)
             success_count += 1
         except Exception as e:
-            logger.error(f"[broadcast] Failed to send to {user.telegram_user_id}: {e}")
+            logger.error(f"[broadcast] Failed to send to {u.telegram_user_id}: {e}")
             fail_count += 1
-    
     return (f"✅ *Broadcast Complete!*\n\n"
-           f"• Sent: {success_count}\n"
-           f"• Failed: {fail_count}\n"
-           f"• Total: {len(all_users)}")
-
-
-async def handle_upgrade_command(db: Session, user: User) -> str:
-    """Handle /upgrade command - shows upgrade info with test bypass."""
-    from app.services import payments
-    
-    # Check quota status
-    quota_status = payments.get_quota_status(user)
-    
-    # Check if already premium
-    if user.tier == "pro":
-        # Show remaining quota
-        expires = quota_status.get("premium_expires_at", "Unknown")
-        resets = quota_status.get("quota_resets_at", "Unknown")
-        
-        return f"""✅ *You're Already Premium!*
-
-📊 *Current Quota:*
-• Resume: {quota_status['resume']['remaining']}/{quota_status['resume']['limit']} remaining
-• CV: {quota_status['cv']['remaining']}/{quota_status['cv']['limit']} remaining
-• Cover Letter: {quota_status['cover_letter']['remaining']}/{quota_status['cover_letter']['limit']} remaining
-• Revamp: {quota_status['revamp']['remaining']}/{quota_status['revamp']['limit']} remaining
-
-⏰ *Quota resets:* {resets[:10] if resets != "Unknown" else "Soon"}
-⭐ *Premium expires:* {expires[:10] if expires != "Unknown" else "Soon"}
-
-Type /status for full details."""
-    
-    # For testing - no real payment gateway
-    return f"""⭐ *Upgrade to Premium - ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month*
-
-🎯 *What You Get:*
-• 📄 *2 Resumes* per month
-• 📄 *2 CVs* per month
-• 💼 *1 Cover Letter* per month
-• ✨ *1 Revamp* per month
-• 🎨 *3 Professional Templates*
-• 📱 *PDF Format* (instant conversion)
-• 🚀 *Priority AI Enhancements*
-
-📊 *Compare Plans:*
-
-*FREE:*
-• 1 Resume/month
-• 1 CV/month
-• 1 Revamp/month
-• DOCX only
-• ❌ No cover letters
-
-*PREMIUM:*
-• 2 Resumes/month
-• 2 CVs/month
-• 1 Cover Letter/month
-• 1 Revamp/month
-• PDF + DOCX formats
-
-💳 *Monthly Subscription:* ₦{payments.PREMIUM_PACKAGE_PRICE:,}
-✅ *Auto-renews* every 30 days
-📅 *Quota resets* monthly
-
-*🧪 TEST MODE - To upgrade, simply type:* `payment made`
-
-_Note: Real payment gateway will be integrated in production_"""
+            f"• Sent: {success_count}\n"
+            f"• Failed: {fail_count}\n"
+            f"• Total: {len(all_users)}")
 
 
 async def admin_set_user_pro(db: Session, telegram_user_id: str, admin_id: str) -> str:
-    """Admin command to manually upgrade a user to pro tier."""
-    from app.services import payments
-    
-    # Find the user
+    """Admin command to manually grant credits to a user."""
     user = db.query(User).filter(User.telegram_user_id == telegram_user_id).first()
-    
     if not user:
         return f"❌ *User Not Found*\n\nNo user found with Telegram ID: `{telegram_user_id}`"
-    
-    # Check if already pro
-    if user.tier == "pro":
-        return f"""ℹ️ *Already Premium*
 
-User @{user.telegram_username or telegram_user_id} is already on the pro tier.
-
-*Current Status:*
-• Tier: Pro
-• Total generations: {payments.get_total_generations(user)}"""
-    
-    # Upgrade user
-    user.tier = "pro"
-    
-    # Record a waived payment for tracking
-    payments.record_waived_payment(db, user.id, "admin_upgrade", reference=f"admin-{admin_id}-{telegram_user_id}")
-    
+    user.document_credits = (user.document_credits or 0) + 2
+    user.cover_letter_credits = (user.cover_letter_credits or 0) + 1
+    payments.record_waived_payment(db, user.id, "admin_grant", reference=f"admin-{admin_id}-{telegram_user_id}")
     db.commit()
-    logger.info(f"[admin] User {user.id} upgraded to pro by admin {admin_id}")
-    
-    # Notify the user
+    logger.info(f"[admin] Credits granted to user {user.id} by admin {admin_id}")
+
     from app.services import telegram
     try:
         await telegram.reply_text(
             telegram_user_id,
-            """🎉 *Congratulations!*
-
-Your account has been upgraded to Premium!
-
-You now have access to:
-• 🎨 Multiple professional templates
-• 📄 Unlimited PDF conversions
-• 🚀 Priority AI enhancements
-• 💼 All document types
-
-Type /status to see your premium features!"""
+            "🎉 *Credits Added!*\n\n"
+            "You've been granted:\n"
+            "• 📄 2 document credits\n"
+            "• ✉️ 1 cover letter credit\n\n"
+            f"Your balance:\n{payments.get_credit_summary(user)}\n\n"
+            "Type /status to see your credits!",
         )
     except Exception as e:
-        logger.error(f"[admin] Failed to notify user {telegram_user_id} of upgrade: {e}")
-    
-    return f"""✅ *User Upgraded Successfully*
+        logger.error(f"[admin] Failed to notify user {telegram_user_id}: {e}")
 
-@{user.telegram_username or telegram_user_id} has been upgraded to Pro tier.
-
-*Updated Status:*
-• Tier: Pro
-• Total generations: {payments.get_total_generations(user)}
-• User notified: ✓"""
+    return (f"✅ *Credits Granted*\n\n"
+            f"@{user.telegram_username or telegram_user_id} received 2 doc + 1 CL credits.\n"
+            f"Current: {payments.get_credit_summary(user)}")
 
 
 async def generate_sample_document(db: Session, user_id: int, template_choice: str = "template_1", doc_type: str = "resume") -> tuple[str, str]:
-    """
-    Generate a sample document with pre-filled data for admin testing.
-    
-    Args:
-        db: Database session
-        user_id: User ID
-        template_choice: Template to use (template_1, template_2, or template_3)
-        doc_type: Document type (resume, cv, or cover)
-    
-    Returns:
-        Tuple of (job_id, filename)
-    """
     import json
-    import os
     from pathlib import Path
-    
-    # Load sample data
-    # __file__ is /app/app/services/router.py, so go up 3 levels to /app/
+
     sample_file = Path(__file__).parent.parent.parent / "sample_resume_data.json"
-    
     try:
         with open(sample_file, 'r', encoding='utf-8') as f:
             sample_data = json.load(f)
     except Exception as e:
         logger.error(f"[generate_sample] Failed to load sample data: {e}")
         raise Exception("Failed to load sample data file")
-    
-    # Add template choice
+
     sample_data["template"] = template_choice
     sample_data["_step"] = "done"
-    
-    # Create a job with sample data
+
     job = Job(
         user_id=user_id,
-        type=doc_type,  # Use the specified doc type
+        type=doc_type,
         status="preview_ready",
         answers=sample_data
     )
     db.add(job)
     db.commit()
     db.refresh(job)
-    
     logger.info(f"[generate_sample] Created sample job.id={job.id} with template={template_choice}")
-    
-    # Generate the document
+
     try:
-        # Call appropriate renderer based on doc type
         if doc_type == "cv":
             doc_bytes = renderer.render_cv(job)
         elif doc_type == "cover":
             doc_bytes = renderer.render_cover_letter(job)
-        else:  # resume
+        else:
             doc_bytes = renderer.render_resume(job)
-        
-        # Generate user-friendly filename for sample
         filename = _generate_filename(job)
-        
-        # Save to storage
         file_path = storage.save_file_locally(job.id, doc_bytes, filename)
-        
-        # Update job status
         job.status = "completed"
         job.file_path = file_path
         db.commit()
-        
         logger.info(f"[generate_sample] Generated sample document: {filename}")
-        
         return (job.id, filename)
-    
     except Exception as e:
         logger.error(f"[generate_sample] Document generation failed: {e}")
         job.status = "failed"
@@ -1628,48 +1107,58 @@ async def generate_sample_document(db: Session, user_id: int, template_choice: s
 
 
 async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: str | None = None, telegram_username: str | None = None, first_name: str = "there") -> str:
-    # NOTE: Deduplication is handled in webhook.py before calling this function
-
     # 0) Ensure user
     user = db.query(User).filter(User.telegram_user_id == telegram_user_id).first()
     if not user:
         user = User(
             telegram_user_id=telegram_user_id,
             telegram_username=telegram_username,
-            tier="free"  # Default to free tier
+            telegram_first_name=first_name if first_name != "there" else None,
         )
         db.add(user)
         db.commit()
         db.refresh(user)
-        logger.info(f"[handle_inbound] Created new user telegram_user_id={telegram_user_id} tier=free")
+        logger.info(f"[handle_inbound] Created new user telegram_user_id={telegram_user_id}")
     else:
-        # Refresh user from database to ensure we have the latest tier status
+        if first_name and first_name != "there" and not getattr(user, "telegram_first_name", None):
+            user.telegram_first_name = first_name
+            db.commit()
         db.refresh(user)
-        logger.info(f"[handle_inbound] User {telegram_user_id} tier={user.tier}")
+        logger.info(f"[handle_inbound] User {telegram_user_id}")
 
     incoming = (text or "").strip()
+    if "@" in incoming and incoming.startswith("/"):
+        incoming = incoming.split("@")[0].strip()
     t_lower = incoming.lower()
 
     # 1) Log inbound message
     db.add(Message(user_id=user.id, direction="inbound", content=incoming))
     db.commit()
 
-    # 1.4) Onboarding: user awaiting intent response — route to intent handler first
+    # 1.4) Onboarding: user awaiting intent response
     onboarding_step = getattr(user, "onboarding_step", None)
     if onboarding_step == "awaiting_intent_response":
         if t_lower in HELP_COMMANDS:
             return HELP_MESSAGE + "\n\n_What brings you here today? Tell me what you're looking for._"
         if t_lower in STATUS_COMMANDS:
-            quota = payments.get_quota_status(user)
-            tier_label = "Premium" if user.tier == "pro" else "Free"
-            status_msg = f"📊 Plan: {tier_label} | Resume: {quota['resume']['used']}/{quota['resume']['limit']} | CV: {quota['cv']['used']}/{quota['cv']['limit']}"
-            return status_msg + "\n\n_What brings you here today? Tell me what you're looking for._"
+            summary = payments.get_credit_summary(user)
+            return f"📊 *Your credits:*\n{summary}\n\n_What brings you here today? Tell me what you're looking for._"
         reply = onboarding_flow.handle_onboarding_intent_response(db, user, incoming, telegram_user_id, first_name)
         if reply:
             return reply
 
-    # 1.45) /start and greetings — onboarding or menu
-    if t_lower in GREETINGS:
+    # 1.44) /start with referral code
+    if incoming.startswith("/start ") and len(incoming.split()) > 1:
+        parts = incoming.split()
+        if len(parts) > 1 and parts[1].startswith("ref_"):
+            ref_code = parts[1].replace("ref_", "").strip()
+            if ref_code and not getattr(user, "referred_by_code", None):
+                from app.services import referral as referral_svc
+                referral_svc.handle_referral_signup(user, ref_code, db)
+
+    # 1.45) /start and greetings
+    is_start = t_lower in GREETINGS or t_lower.startswith("/start")
+    if is_start:
         if hasattr(user, "onboarding_step") and user.onboarding_step:
             user.onboarding_step = None
             db.commit()
@@ -1683,176 +1172,127 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
             msg = onboarding_flow.ACTIVE_JOB_PROMPT.format(first_name=first_name, doc_type=doc_label)
             return f"__SHOW_ONBOARDING_CONTINUE_MENU__|{msg}"
         msg = onboarding_flow.RETURNING_USER_MENU.format(first_name=first_name)
-        return f"__SHOW_DOCUMENT_MENU__|{user.tier}|{msg}"
+        return f"__SHOW_DOCUMENT_MENU__|credits|{msg}"
 
-    # 1.5) Admin commands (only for admins)
-    # Check if message starts with any admin command
+    # 1.5) Admin commands
     is_admin_command = any(t_lower.startswith(cmd) for cmd in ADMIN_COMMANDS)
-    
     if is_admin_command:
         if not is_admin(telegram_user_id):
-            logger.warning(f"[handle_inbound] Non-admin {telegram_user_id} tried to use admin command: {t_lower}")
+            logger.warning(f"[handle_inbound] Non-admin {telegram_user_id} tried admin command: {t_lower}")
             return "⚠️ This command is only available to administrators."
-        
+
         logger.info(f"[handle_inbound] Admin {telegram_user_id} using command: {t_lower}")
         if t_lower in {"/stats", "/admin"}:
             return await get_admin_stats(db)
         elif t_lower.startswith("/broadcast "):
-            # Extract message after "/broadcast "
             broadcast_msg = incoming[len("/broadcast "):].strip()
             if broadcast_msg:
                 return await broadcast_message(db, broadcast_msg, telegram_user_id)
-            else:
-                return ("📢 *Broadcast Command*\n\n"
-                       "*Usage:* /broadcast <message>\n\n"
-                       "*Example:* /broadcast Hello everyone! New features coming soon!")
+            return ("📢 *Broadcast Command*\n\n"
+                    "*Usage:* /broadcast <message>\n\n"
+                    "*Example:* /broadcast Hello everyone! New features coming soon!")
         elif t_lower.startswith("/setpro ") or t_lower.startswith("/makeadmin "):
-            # Extract telegram user ID after the command
             target_user_id = incoming.split(maxsplit=1)[1].strip() if len(incoming.split()) > 1 else ""
             if target_user_id:
                 return await admin_set_user_pro(db, target_user_id, telegram_user_id)
-            else:
-                return ("👤 *Upgrade User to Premium*\n\n"
-                       "*Usage:* /setpro <telegram_user_id>\n\n"
-                       "*Example:* /setpro 123456789\n\n"
-                       "_This will upgrade the user to Pro tier and notify them._")
+            return ("👤 *Grant Credits to User*\n\n"
+                    "*Usage:* /setpro <telegram\\_user\\_id>\n\n"
+                    "*Example:* /setpro 123456789\n\n"
+                    "_Grants 2 doc + 1 CL credits and notifies the user._")
         elif t_lower.startswith("/sample"):
-            # Generate sample document for testing
-            # Usage: /sample <type> [template]
-            # Example: /sample resume 1, /sample cv 2, /sample cover 3
             parts = incoming.split()
-            
-            # Check if doc type is provided
             if len(parts) < 2:
                 return ("📄 *Generate Sample Document*\n\n"
-                       "Type the complete command in ONE message:\n\n"
-                       "✅ `/sample resume` - Generate sample resume\n"
-                       "✅ `/sample cv` - Generate sample CV\n"
-                       "✅ `/sample cover` - Generate sample cover letter\n\n"
-                       "Optional: Add template number (1-3):\n"
-                       "✅ `/sample resume 2` - Resume with template 2\n\n"
-                       "_Note: Type the full command at once, not separately!_")
-            
+                        "Type the complete command in ONE message:\n\n"
+                        "✅ `/sample resume` - Generate sample resume\n"
+                        "✅ `/sample cv` - Generate sample CV\n"
+                        "✅ `/sample cover` - Generate sample cover letter\n\n"
+                        "Optional: Add template number (1-3):\n"
+                        "✅ `/sample resume 2` - Resume with template 2\n\n"
+                        "_Note: Type the full command at once, not separately!_")
             doc_type = parts[1].lower()
             if doc_type not in {"resume", "cv", "cover"}:
-                return ("❌ Invalid document type!\n\n"
-                       "Use: `/sample resume`, `/sample cv`, or `/sample cover`")
-            
-            template_num = "1"  # Default to template 1
+                return "❌ Invalid document type!\n\nUse: `/sample resume`, `/sample cv`, or `/sample cover`"
+            template_num = "1"
             if len(parts) > 2 and parts[2] in {"1", "2", "3"}:
                 template_num = parts[2]
-            
             template_choice = f"template_{template_num}"
-            
             try:
                 logger.info(f"[handle_inbound] Admin generating sample {doc_type} with {template_choice}")
-                
                 job_id, filename = await generate_sample_document(db, user.id, template_choice, doc_type)
-                
-                # Return marker to send document
                 return f"__SEND_DOCUMENT__|{job_id}|{filename}"
-            
             except Exception as e:
                 logger.error(f"[handle_inbound] Sample generation failed: {e}")
                 error_msg = str(e).replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
                 return (f"❌ *Sample Generation Failed*\n\n"
-                       f"Error: `{error_msg}`\n\n"
-                       f"Please check the logs for details.")
+                        f"Error: `{error_msg}`\n\n"
+                        f"Please check the logs for details.")
 
     # 1.6) Help command
     if t_lower in HELP_COMMANDS:
+        active_for_help = _active_collecting_job(db, user.id)
+        if active_for_help:
+            step = (active_for_help.answers or {}).get("_step", "basics")
+            step_label = STEP_LABELS.get(step, step)
+            step_prompt = STEP_REPROMPTS.get(step, "Let's continue from where we left off.")
+            doc_label = {"resume": "resume", "cv": "CV", "cover": "cover letter"}.get(active_for_help.type, active_for_help.type)
+            return f"{HELP_MESSAGE}\n\n━━━━━━━━━━━━━━━━━━━━\n📄 *Back to your {doc_label}*\n\nWe're on: *{step_label}*\n\n{step_prompt}"
         return HELP_MESSAGE
 
     # 1.7) Status command
     if t_lower in STATUS_COMMANDS:
-        logger.info(f"[handle_inbound] Processing /status command for user {telegram_user_id}")
-        
-        # Get quota status
-        quota_status = payments.get_quota_status(user)
-        
-        # Special status for admin users
-        if quota_status['tier'] == 'admin':
-            status_msg = f"""👑 *Admin Account Status*
-
-👤 User: {user.name or user.telegram_username or 'Admin'}
-🎯 Plan: **ADMIN** (Unlimited Access)
-
-📦 *Quota:*
-📄 Resume: ∞ (Unlimited)
-📄 CV: ∞ (Unlimited)
-💼 Cover Letter: ∞ (Unlimited)
-✨ Revamp: ∞ (Unlimited)
-
-📱 PDF Format: ✅ Enabled (Unlimited)
-
-🚀 *Admin Privileges:*
-• Unlimited document generation
-• All document types unlocked
-• PDF conversion always available
-• No quota restrictions
-• No expiry date
-
-Ready to create? Type /start!"""
-            return status_msg
-        
+        logger.info(f"[handle_inbound] Processing /status for user {telegram_user_id}")
+        summary = payments.get_credit_summary(user)
         status_msg = f"""📊 *Your Account Status*
 
 👤 User: {user.name or user.telegram_username or 'User'}
-🎯 Plan: {'Premium ⭐' if user.tier == 'pro' else 'Free'}
 
-📦 *Monthly Quota:*
-📄 Resume: {quota_status['resume']['used']}/{quota_status['resume']['limit']} used ({quota_status['resume']['remaining']} remaining)
-📄 CV: {quota_status['cv']['used']}/{quota_status['cv']['limit']} used ({quota_status['cv']['remaining']} remaining)
-💼 Cover Letter: {quota_status['cover_letter']['used']}/{quota_status['cover_letter']['limit']} used ({quota_status['cover_letter']['remaining']} remaining)
-✨ Revamp: {quota_status['revamp']['used']}/{quota_status['revamp']['limit']} used ({quota_status['revamp']['remaining']} remaining)
+*Your Credits:*
+{summary}
 
-📱 PDF Format: {'✅ Enabled' if quota_status['pdf_allowed'] else '❌ Upgrade Required'}
+*Pricing:*
+• Resume/CV — {payments.PRICE_DISPLAY['resume']}
+• Cover Letter — {payments.PRICE_DISPLAY['cover_letter']}
+• Bundle (2 docs + 1 CL) — {payments.PRICE_DISPLAY['bundle']} _save ₦3,000_
 
-"""
-        
-        # Show reset/expiry dates
-        if quota_status.get('quota_resets_at'):
-            from datetime import datetime
-            try:
-                reset_date = datetime.fromisoformat(quota_status['quota_resets_at'])
-                status_msg += f"⏰ Quota resets: {reset_date.strftime('%B %d, %Y')}\n"
-            except:
-                pass
-        
-        if user.tier == 'pro' and quota_status.get('premium_expires_at'):
-            from datetime import datetime
-            try:
-                expires_date = datetime.fromisoformat(quota_status['premium_expires_at'])
-                status_msg += f"⭐ Premium expires: {expires_date.strftime('%B %d, %Y')}\n"
-            except:
-                pass
-        
-        if user.tier == "free":
-            status_msg += f"""
-💡 *Upgrade to Premium?*
-For just ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month, get:
-• 2 Resumes + 2 CVs
-• 1 Cover Letter
-• PDF format
-• All premium features
+Type /buy\\_resume, /buy\\_cv, /buy\\_cover\\_letter, or /buy\\_bundle to purchase.
+Type /referral to earn free credits!
 
-Type */upgrade* to get started!
-"""
-        
-        status_msg += "\nReady to create? Type /start!"
+Ready to create? Type /start!"""
         return status_msg
+
+    # 1.7.4) Render retry
+    if t_lower in {"retry", "try again", "retry again"}:
+        render_failed_job = (
+            db.query(Job)
+            .filter(Job.user_id == user.id, Job.status == "render_failed")
+            .order_by(Job.created_at.desc())
+            .first()
+        )
+        if render_failed_job:
+            answers = render_failed_job.answers or {}
+            answers["_step"] = "draft_ready" if render_failed_job.type in {"resume", "cv"} else "preview"
+            render_failed_job.answers = answers
+            render_failed_job.status = "collecting"
+            flag_modified(render_failed_job, "answers")
+            db.commit()
+            db.refresh(render_failed_job)
+            if render_failed_job.type in {"resume", "cv"}:
+                reply = await handle_resume(db, render_failed_job, "retry")
+            elif render_failed_job.type == "cover":
+                reply = await handle_cover(db, render_failed_job, "yes")
+            else:
+                reply = ""
+            db.add(Message(user_id=user.id, job_id=render_failed_job.id, direction="outbound", content=reply or ""))
+            db.commit()
+            return reply
 
     # 1.7.5) History command
     if t_lower in HISTORY_COMMANDS:
-        logger.info(f"[handle_inbound] Processing /history command for user {telegram_user_id}")
+        logger.info(f"[handle_inbound] Processing /history for user {telegram_user_id}")
         from app.services import document_history
-        
-        # Get document counts
         counts = document_history.count_user_documents(db, user.id)
-        
-        # Get recent documents
         history = document_history.get_user_document_history(db, user.id, limit=5)
-        
         history_msg = f"""📚 *Your Document History*
 
 📊 Total Documents: {counts['total']}
@@ -1862,7 +1302,6 @@ Type */upgrade* to get started!
 • ✨ Revamps: {counts['revamps']}
 
 """
-        
         if history:
             history_msg += "*Recent Documents:*\n\n"
             for idx, doc in enumerate(history, 1):
@@ -1871,73 +1310,76 @@ Type */upgrade* to get started!
                 history_msg += f"   Created: {doc['created_at']}\n\n"
         else:
             history_msg += "_You haven't created any documents yet._\n\n"
-        
         history_msg += "Ready to create more? Type /start!"
         return history_msg
 
-    # 1.8) Upgrade command
-    if t_lower in UPGRADE_COMMANDS:
-        logger.info(f"[handle_inbound] Processing /upgrade command for user {telegram_user_id}")
-        return await handle_upgrade_command(db, user)
-    
-    # 1.8.5) Payment bypass for testing (no real payment gateway)
-    if t_lower in PAYMENT_BYPASS_PHRASES:
-        logger.info(f"[handle_inbound] Payment bypass triggered for user {telegram_user_id}")
-        
-        # Check if already premium
-        if user.tier == "pro":
-            quota_status = payments.get_quota_status(user)
-            return f"""✅ You're already a Premium user!
-
-📊 *Current Quota:*
-• Resume: {quota_status['resume']['remaining']}/{quota_status['resume']['limit']} remaining
-• CV: {quota_status['cv']['remaining']}/{quota_status['cv']['limit']} remaining
-• Cover Letter: {quota_status['cover_letter']['remaining']}/{quota_status['cover_letter']['limit']} remaining
-• Revamp: {quota_status['revamp']['remaining']}/{quota_status['revamp']['limit']} remaining
-
-Type /status for full details."""
-        
-        # Upgrade user to premium using the new system
-        success = payments.upgrade_to_premium(db, user)
-        
-        if not success:
-            return "❌ Sorry, there was an error upgrading your account. Please try again or contact support."
-        
-        # Record waived payment for tracking
-        payments.record_waived_payment(db, user.id, "premium_package", reference=f"test-{telegram_user_id}")
-        
-        # Refresh user to get updated tier
-        db.refresh(user)
-        logger.info(f"[handle_inbound] User {user.id} upgraded to premium via bypass")
-        
-        return f"""🎉 *Welcome to Premium!*
-
-✅ Account upgraded successfully
-
-📦 *Your Monthly Package:*
-• 📄 2 Resumes
-• 📄 2 CVs
-• 💼 1 Cover Letter
-• ✨ 1 Revamp
-• 📱 PDF Format (unlimited conversions)
-• 🎨 3 Professional Templates
-
-⏰ *Renews:* Monthly (auto-reset)
-💳 *Price:* ₦{payments.PREMIUM_PACKAGE_PRICE:,}/month
-
-*🚀 Ready to create?*
-Type /start to see the menu, then choose:
-• *Resume* - Professional 1-2 page resume
-• *CV* - Detailed curriculum vitae
-• *Cover Letter* - Tailored application letter
-• *Revamp* - Improve an existing document
-
-Or simply type what you want to create!"""
+    # 1.8) Buy commands
+    if t_lower in BUY_COMMANDS:
+        product_map = {
+            "/buy_resume": "resume",
+            "/buy_cv": "cv",
+            "/buy_cover_letter": "cover_letter",
+            "/buy_bundle": "bundle",
+        }
+        product_type = product_map.get(t_lower)
+        if not product_type:
+            return "Invalid command. Try /buy\\_resume, /buy\\_cv, /buy\\_cover\\_letter, or /buy\\_bundle."
+        logger.info(f"[handle_inbound] Buy command: {product_type} for user {telegram_user_id}")
+        result = await payments.initiate_payment(user, product_type, db)
+        if "error" in result:
+            return ("❌ Sorry, we couldn't create your payment link. Please try again later.\n\n"
+                    "Support: 07063011079")
+        price = payments.PRICE_DISPLAY.get(product_type, "")
+        awards = payments.CREDIT_AWARDS.get(product_type, {})
+        award_lines = []
+        if awards.get("document_credits"):
+            award_lines.append(f"📄 {awards['document_credits']} document credit{'s' if awards['document_credits'] > 1 else ''}")
+        if awards.get("cover_letter_credits"):
+            award_lines.append(f"✉️ {awards['cover_letter_credits']} cover letter credit{'s' if awards['cover_letter_credits'] > 1 else ''}")
+        award_text = "\n".join(award_lines)
+        return (f"💳 *Payment Link Created*\n\n"
+                f"Product: *{product_type.replace('_', ' ').title()}*\n"
+                f"Price: *{price}*\n\n"
+                f"You'll receive:\n{award_text}\n\n"
+                f"Click here to pay:\n{result['payment_url']}\n\n"
+                f"_Credits will be added automatically after payment._")
 
     # 1.9) PDF conversion command
-    if t_lower in PDF_COMMANDS or "convert" in t_lower and "pdf" in t_lower:
-        logger.info(f"[handle_inbound] Processing /pdf command for user {telegram_user_id}")
+    if t_lower in PDF_COMMANDS or ("convert" in t_lower and "pdf" in t_lower):
+        logger.info(f"[handle_inbound] Processing /pdf for user {telegram_user_id}")
         return await convert_to_pdf(db, user, telegram_user_id)
+
+    # 1.9.5) Revision flow — check BEFORE other routing
+    revising_job = _active_revising_job(db, user.id)
+    if revising_job:
+        from app.flows import revision
+        return revision.handle_revision_step(db, revising_job, incoming, telegram_user_id)
+
+    # 1.9.6) /revise command
+    if t_lower in REVISE_COMMANDS:
+        from app.flows.revision import start_revision, _get_latest_done_job
+        latest_done = _get_latest_done_job(db, user.id)
+        if not latest_done:
+            return "You don't have any completed documents to revise yet. Create one first with /start!"
+        latest_done.status = "revising"
+        db.commit()
+        return start_revision(db, latest_done, telegram_user_id)
+
+    # 1.9.7) /referral command
+    if t_lower in REFERRAL_COMMANDS:
+        from app.services import referral as referral_svc
+        from app.config import settings as app_settings
+        code = referral_svc.get_or_create_referral_code(user, db)
+        bot_username = app_settings.telegram_bot_username
+        link = f"https://t.me/{bot_username}?start=ref_{code}"
+        credits = getattr(user, "referral_credits", 0) or 0
+        return (
+            f"Share your link and earn a *free document credit* every time "
+            f"someone you refer makes their first purchase!\n\n"
+            f"Your link:\n{link}\n\n"
+            f"*Your credits:* {credits}\n\n"
+            f"Credits apply automatically on your next document — no code needed."
+        )
 
     # 2) Reset/menu
     if t_lower in RESETS:
@@ -1948,48 +1390,17 @@ Or simply type what you want to create!"""
             logger.info(f"[handle_inbound] Reset triggered, closed job.id={j.id}")
         return "__SHOW_MENU__"
 
-    # 2.5) Handle tier selection (Free/Premium)
-    if t_lower in {"free", "premium", "pro"}:
-        # Update user tier
-        if t_lower == "free":
-            user.tier = "free"
-            tier_msg = "✅ *Free Plan activated!*\n\nYou get *2 free documents* to create professional resumes and CVs with AI assistance.\n\nAfter that, each additional document costs ₦7,500.\n\nLet's build something great together!"
-        else:  # premium or pro
-            user.tier = "free"  # Still free tier, but they know about payment
-            tier_msg = "✅ *Ready to get started!*\n\nYou get *2 free documents* with AI-powered generation.\n\nAfter that, each document costs ₦7,500 with enhanced AI features:\n• Business impact analysis\n• Senior-level summaries\n• Priority support\n\nLet's create something exceptional!"
-
-        db.commit()
-        db.refresh(user)
-        logger.info(f"[handle_inbound] Updated user telegram_user_id={telegram_user_id} to tier={user.tier}")
-
-        # Log the tier confirmation message
-        db.add(Message(user_id=user.id, direction="outbound", content=tier_msg))
-        db.commit()
-
-        # Return marker to show document type menu with confirmation message
-        return f"__SHOW_DOCUMENT_MENU__|{user.tier}|{tier_msg}"
-
     # 3) Get/create active job (based on intent if present)
-    # Only infer doc_type if there's no active job to avoid false positives
     active_job = _active_collecting_job(db, user.id)
     doc_type = infer_type(incoming) if not active_job else None
-    logger.info(f"[handle_inbound] doc_type={doc_type}, active_job={'Yes' if active_job else 'No'}, user.tier={user.tier}, user.id={user.id}")
+    logger.info(f"[handle_inbound] doc_type={doc_type}, active_job={'Yes' if active_job else 'No'}, user.id={user.id}")
 
-    # Check if free user is trying to access cover letter
-    if doc_type == "cover" and user.tier == "free":
-        logger.warning(f"[handle_inbound] Blocking free user {user.id} from cover letter. Tier: {user.tier}")
-        return ("💼 *Cover Letters are a Premium feature*\n\n"
-                "Upgrade to Premium and unlock:\n"
-                "✨ Professional cover letter generation\n"
-                "✨ Enhanced AI with business impact analysis\n"
-                "✨ Senior-level summaries\n"
-                "✨ Priority support\n\n"
-                "Ready to upgrade? Type *Premium* to get started!")
-    
-    if doc_type == "cover" and user.tier != "free":
-        logger.info(f"[handle_inbound] Allowing premium user {user.id} (tier={user.tier}) to access cover letter")
-    
-    # Block revamp feature - Coming Soon
+    # Gate: check credit at flow entry for new jobs
+    if doc_type and not active_job:
+        if not payments.can_generate(user, doc_type):
+            return payments.get_purchase_prompt(doc_type)
+
+    # Block revamp feature
     if doc_type == "revamp":
         logger.info(f"[handle_inbound] Blocking revamp feature for user {user.id} - coming soon")
         return ("✨ *Revamp Feature - Coming Soon!*\n\n"
@@ -2006,9 +1417,9 @@ Or simply type what you want to create!"""
     if not job and not doc_type:
         return "__SHOW_MENU__"
 
-    # 4) Job-level deduplication (prevent double-processing same message)
+    # 4) Job-level deduplication
     if _dedupe(db, job, msg_id):
-        return ""  # Already processed
+        return ""
 
     # 5) Ensure answers dict + step
     ans = job.answers if isinstance(job.answers, dict) else {}
@@ -2024,13 +1435,13 @@ Or simply type what you want to create!"""
 
     # 6) Route to the correct flow
     if job.type in {"resume", "cv"}:
-        reply = await handle_resume(db, job, incoming, user_tier=user.tier)
+        reply = await handle_resume(db, job, incoming)
         _log_state("after handle_resume", job)
     elif job.type == "revamp":
-        reply = await handle_revamp(db, job, incoming, user_tier=user.tier)
+        reply = await handle_revamp(db, job, incoming)
         _log_state("after handle_revamp", job)
     elif job.type == "cover":
-        reply = await handle_cover(db, job, incoming, user_tier=user.tier)
+        reply = await handle_cover(db, job, incoming)
         _log_state("after handle_cover", job)
     else:
         reply = "Unsupported document type. Please reply *Resume*, *CV*, *Cover Letter*, or *Revamp* to begin."

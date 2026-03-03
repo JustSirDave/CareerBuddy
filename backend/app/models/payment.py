@@ -19,10 +19,11 @@ class Payment(Base):
     provider = Column(String(50), default="paystack")
     amount = Column(Integer, nullable=False)  # Amount in kobo (NGN) or smallest currency unit
     currency = Column(String(10), default="NGN")
-    status = Column(String(50), default="init")  # init, success, failed, refunded
-    reference = Column(String(200), unique=True, index=True)  # Paystack reference
+    status = Column(String(50), default="init")  # pending, success, failed, waived
+    reference = Column(String(200), unique=True, index=True)
+    product_type = Column(String(20), nullable=True)  # resume, cv, cover_letter, bundle
 
-    payment_metadata = Column(JSON)  # Sanitized metadata from provider
+    payment_metadata = Column(JSON)
     raw_webhook = Column(JSON)  # Store full webhook payload for debugging
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

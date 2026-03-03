@@ -3,45 +3,48 @@ CareerBuddy - Telegram Bot Service
 Handles sending messages and documents via Telegram Bot API
 Author: Sir Dave
 """
+import asyncio
 import httpx
 from io import BytesIO
 from loguru import logger
 from app.config import settings
 
+MAX_SEND_RETRIES = 3
+RETRY_BASE_DELAY = 1  # seconds
+
 
 async def reply_text(chat_id: int | str, text: str, parse_mode: str = "Markdown"):
     """
-    Send a text message via Telegram Bot API.
-
-    Args:
-        chat_id: Telegram chat ID (user ID)
-        text: Message text (supports Markdown formatting)
-        parse_mode: Message formatting (Markdown, HTML, or None)
-
-    Returns:
-        Response JSON from Telegram API
+    Send a text message via Telegram Bot API with retry on transient failures.
+    Returns dict with response or {"error": str}. Never raises.
     """
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": parse_mode
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.post(url, json=payload)
-            if r.status_code >= 400:
-                logger.error(f"Telegram send text failed: {r.status_code} {r.text}")
-            else:
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
+    last_error = None
+    for attempt in range(MAX_SEND_RETRIES):
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                r = await client.post(url, json=payload)
+            if r.status_code == 200:
                 logger.info(f"[telegram] Message sent successfully to {chat_id}")
-            return r.json() if r.content else {}
-    except httpx.TimeoutException as e:
-        logger.error(f"Telegram send text timeout after 60s: {e}")
-        return {"error": "timeout"}
-    except Exception as e:
-        logger.error(f"Telegram send text exception: {type(e).__name__}: {e}")
-        return {"error": str(e)}
+                return r.json() if r.content else {}
+            if r.status_code == 403:
+                logger.warning(f"Bot blocked by user {chat_id}")
+                return {"error": "blocked"}
+            if r.status_code == 429:
+                retry_after = int(r.headers.get("Retry-After", 5))
+                await asyncio.sleep(retry_after)
+                continue
+            last_error = f"{r.status_code} {r.text}"
+        except (httpx.TimeoutException, httpx.NetworkError) as e:
+            last_error = e
+            delay = RETRY_BASE_DELAY * (2 ** attempt)
+            await asyncio.sleep(delay)
+        except Exception as e:
+            last_error = e
+            break
+    logger.error(f"Failed to send message to {chat_id} after {MAX_SEND_RETRIES} attempts: {last_error}")
+    return {"error": str(last_error)}
 
 
 async def send_choice_menu(chat_id: int | str):
@@ -186,48 +189,39 @@ Choose what you'd like to create:"""
 
 async def send_document(chat_id: int | str, file_bytes: bytes, filename: str, caption: str = None) -> dict:
     """
-    Send a document file to a Telegram user.
-
-    Args:
-        chat_id: Telegram chat ID
-        file_bytes: File content as bytes
-        filename: Name of the file
-        caption: Optional caption text
-
-    Returns:
-        Response JSON from Telegram API
+    Send a document file to a Telegram user with retry on transient failures.
     """
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendDocument"
-
-    try:
-        logger.info(f"[telegram] Sending document: {filename} ({len(file_bytes)} bytes)")
-        
-        # Prepare multipart form data
-        files = {
-            'document': (filename, BytesIO(file_bytes), 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-        }
-        
-        data = {
-            'chat_id': chat_id
-        }
-        
-        if caption:
-            data['caption'] = caption
-
-        async with httpx.AsyncClient(timeout=60) as client:
-            r = await client.post(url, files=files, data=data)
-
-            if r.status_code >= 400:
-                logger.error(f"Telegram send document failed: {r.status_code} {r.text}")
-                return {"error": "document_send_failed"}
-            else:
+    files = {"document": (filename, BytesIO(file_bytes), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+    data = {"chat_id": chat_id}
+    if caption:
+        data["caption"] = caption
+    last_error = None
+    for attempt in range(MAX_SEND_RETRIES):
+        try:
+            logger.info(f"[telegram] Sending document: {filename} ({len(file_bytes)} bytes)")
+            async with httpx.AsyncClient(timeout=90) as client:
+                r = await client.post(url, files=files, data=data)
+            if r.status_code == 200:
                 logger.info(f"[telegram] Document sent successfully to {chat_id}: {filename}")
-
-            return r.json() if r.content else {}
-
-    except Exception as e:
-        logger.error(f"[telegram] Document send exception: {e}")
-        return {"error": str(e)}
+                return r.json() if r.content else {}
+            if r.status_code == 403:
+                logger.warning(f"Bot blocked by user {chat_id}")
+                return {"error": "blocked"}
+            if r.status_code == 429:
+                retry_after = int(r.headers.get("Retry-After", 10))
+                await asyncio.sleep(retry_after)
+                continue
+            last_error = f"{r.status_code} {r.text}"
+        except (httpx.TimeoutException, httpx.NetworkError) as e:
+            last_error = e
+            delay = RETRY_BASE_DELAY * (2 ** attempt)
+            await asyncio.sleep(delay)
+        except Exception as e:
+            last_error = e
+            break
+    logger.error(f"Failed to send document to {chat_id} after {MAX_SEND_RETRIES} attempts: {last_error}")
+    return {"error": str(last_error)}
 
 
 async def send_typing_action(chat_id: int | str):

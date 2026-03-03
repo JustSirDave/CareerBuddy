@@ -35,8 +35,10 @@ def get_system_analytics(db: Session, days: int = 7) -> Dict:
         # User statistics
         total_users = db.query(User).count()
         new_users = db.query(User).filter(User.created_at >= cutoff_date).count()
-        premium_users = db.query(User).filter(User.tier == "pro").count()
-        free_users = total_users - premium_users
+        paid_users = db.query(User).filter(
+            (User.document_credits > 0) | (User.cover_letter_credits > 0)
+        ).count()
+        free_users = total_users - paid_users
         
         # Document statistics
         total_documents = db.query(Job).filter(
@@ -98,7 +100,6 @@ def get_system_analytics(db: Session, days: int = 7) -> Dict:
         top_users = db.query(
             User.telegram_username,
             User.name,
-            User.tier,
             func.count(Job.id).label('doc_count')
         ).join(Job, User.id == Job.user_id).filter(
             Job.status.in_(["completed", "preview_ready"])
@@ -115,10 +116,10 @@ def get_system_analytics(db: Session, days: int = 7) -> Dict:
             'users': {
                 'total': total_users,
                 'new': new_users,
-                'premium': premium_users,
+                'paid': paid_users,
                 'free': free_users,
                 'active': active_users,
-                'premium_percentage': round((premium_users / total_users * 100) if total_users > 0 else 0, 2)
+                'paid_percentage': round((paid_users / total_users * 100) if total_users > 0 else 0, 2)
             },
             'documents': {
                 'total': total_documents,
@@ -142,7 +143,7 @@ def get_system_analytics(db: Session, days: int = 7) -> Dict:
             'top_users': [
                 {
                     'username': user.telegram_username or user.name or 'Unknown',
-                    'tier': user.tier,
+                    'tier': 'user',
                     'documents': user.doc_count
                 }
                 for user in top_users
