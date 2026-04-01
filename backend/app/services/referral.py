@@ -63,7 +63,7 @@ def get_completed_payment_count(user_id: str, db: Session) -> int:
         db.query(Payment)
         .filter(
             Payment.user_id == user_id,
-            Payment.status.in_(["success", "successful"]),
+            Payment.status.in_(["success"]),
         )
         .count()
     )

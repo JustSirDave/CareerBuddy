@@ -74,11 +74,11 @@ def get_system_analytics(db: Session, days: int = 7) -> Dict:
         if Payment is not None:
             try:
                 total_payments = db.query(Payment).filter(
-                    Payment.status.in_(["successful", "waived"])
+                    Payment.status.in_(["success", "waived"])
                 ).count()
                 
                 total_revenue = db.query(func.sum(Payment.amount)).filter(
-                    Payment.status == "successful"
+                    Payment.status == "success"
                 ).scalar() or 0
             except Exception as e:
                 logger.warning(f"[ANALYTICS] Payment table query failed: {e}")

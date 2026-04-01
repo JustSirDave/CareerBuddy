@@ -2,12 +2,23 @@
 Pytest configuration and fixtures
 Provides test database, mock services, and sample data
 """
-import pytest
 import os
+import sqlite3
+
+import pytest
 from unittest.mock import Mock, MagicMock, patch
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+
+@event.listens_for(Engine, "connect")
+def _sqlite_enable_foreign_keys(dbapi_connection, _connection_record):
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 from app.db import Base
 from app.models import User, Job, Message, Payment
@@ -205,13 +216,13 @@ def mock_telegram_service():
 
 @pytest.fixture
 def pro_user(db_session):
-    """Create test user with pro tier"""
+    """Create test user with paid document credits (no free-tier limits)."""
     user = User(
         telegram_user_id="987654321",
         telegram_username="pro_user",
         name="Pro User",
-        tier="pro",
-        generation_count=0
+        document_credits=5,
+        cover_letter_credits=2,
     )
     db_session.add(user)
     db_session.commit()

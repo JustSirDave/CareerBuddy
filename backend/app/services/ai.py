@@ -5,15 +5,34 @@ Author: Sir Dave
 """
 import json
 import re
+import time
 from typing import List, Dict, Any
 from loguru import logger
 from openai import OpenAI
 from app.config import settings
 
-# Initialize OpenAI client
+MAX_AI_RETRIES = 2
+AI_RETRY_DELAY = 1.5  # seconds
+
 client = None
 if settings.openai_api_key:
     client = OpenAI(api_key=settings.openai_api_key)
+
+
+def _call_with_retry(fn, *args, fallback=None, **kwargs):
+    """Call fn with automatic retry on transient failures. Returns fallback on exhaustion."""
+    last_exc = None
+    for attempt in range(MAX_AI_RETRIES):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            last_exc = e
+            if attempt < MAX_AI_RETRIES - 1:
+                delay = AI_RETRY_DELAY * (attempt + 1)
+                logger.warning(f"[ai] Retry {attempt + 1}/{MAX_AI_RETRIES} after {delay}s: {e}")
+                time.sleep(delay)
+    logger.error(f"[ai] All {MAX_AI_RETRIES} attempts failed: {last_exc}")
+    return fallback
 
 
 def generate_skills(target_role: str, basics: Dict, experiences: List[Dict], tier: str = "free") -> List[str]:
@@ -42,9 +61,7 @@ def generate_skills(target_role: str, basics: Dict, experiences: List[Dict], tie
 
 def _generate_skills_basic(target_role: str, basics: Dict, experiences: List[Dict]) -> List[str]:
     """Basic skill generation for free tier - simpler prompt."""
-    try:
-        # Simple prompt for free tier
-        prompt = f"""List 8-10 relevant skills for a {target_role} role.
+    prompt = f"""List 8-10 relevant skills for a {target_role} role.
 
 Include a mix of technical and soft skills appropriate for this position.
 
@@ -52,8 +69,9 @@ Return ONLY a comma-separated list of skills, nothing else.
 
 Example format: Python, Data Analysis, SQL, Communication, Problem Solving"""
 
-        logger.info(f"[ai] Generating basic skills for role: {target_role}")
+    logger.info(f"[ai] Generating basic skills for role: {target_role}")
 
+    def _call():
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -61,42 +79,34 @@ Example format: Python, Data Analysis, SQL, Communication, Problem Solving"""
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=150
+            max_tokens=150,
         )
-
         skills_text = response.choices[0].message.content.strip()
-        skills = [s.strip() for s in skills_text.split(",") if s.strip()]
+        return [s.strip() for s in skills_text.split(",") if s.strip()][:10]
 
-        logger.info(f"[ai] Generated {len(skills)} basic skills")
-        return skills[:10]
-
-    except Exception as e:
-        logger.error(f"[ai] Error generating basic skills: {e}")
-        return get_fallback_skills(target_role)
+    result = _call_with_retry(_call, fallback=None)
+    if result:
+        logger.info(f"[ai] Generated {len(result)} basic skills")
+        return result
+    return get_fallback_skills(target_role)
 
 
 def _generate_skills_pro(target_role: str, basics: Dict, experiences: List[Dict]) -> List[str]:
     """Enhanced skill generation for pro tier - detailed analysis."""
-    try:
-        # Build detailed context from user data
-        context_parts = [f"Target Role: {target_role}"]
+    context_parts = [f"Target Role: {target_role}"]
+    if basics.get("title"):
+        context_parts.append(f"Current Title: {basics['title']}")
+    if experiences:
+        context_parts.append("\nWork Experience:")
+        for exp in experiences[:3]:
+            role = exp.get("role", "Unknown Role")
+            company = exp.get("company", "Unknown Company")
+            context_parts.append(f"- {role} at {company}")
+            for bullet in exp.get("bullets", [])[:2]:
+                context_parts.append(f"  • {bullet}")
+    context = "\n".join(context_parts)
 
-        if basics.get("title"):
-            context_parts.append(f"Current Title: {basics['title']}")
-
-        if experiences:
-            context_parts.append("\nWork Experience:")
-            for exp in experiences[:3]:
-                role = exp.get("role", "Unknown Role")
-                company = exp.get("company", "Unknown Company")
-                context_parts.append(f"- {role} at {company}")
-                bullets = exp.get("bullets", [])
-                for bullet in bullets[:2]:
-                    context_parts.append(f"  • {bullet}")
-
-        context = "\n".join(context_parts)
-
-        prompt = f"""Based on the following information about a job candidate, suggest 8-10 highly relevant, specific skills for their resume.
+    prompt = f"""Based on the following information about a job candidate, suggest 8-10 highly relevant, specific skills for their resume.
 
 {context}
 
@@ -112,27 +122,26 @@ Return ONLY a comma-separated list of skills, nothing else.
 
 Example: Python, SQL, Power BI, ETL Pipelines, Data Modeling, Statistical Analysis, Stakeholder Management, Leadership"""
 
-        logger.info(f"[ai] Generating skills for role: {target_role}")
+    logger.info(f"[ai] Generating pro skills for role: {target_role}")
 
+    def _call():
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # Fast and cost-effective
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a professional resume writer helping candidates identify relevant skills."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=200
+            max_tokens=200,
         )
-
         skills_text = response.choices[0].message.content.strip()
-        skills = [s.strip() for s in skills_text.split(",") if s.strip()]
+        return [s.strip() for s in skills_text.split(",") if s.strip()][:10]
 
-        logger.info(f"[ai] Generated {len(skills)} skills: {skills}")
-        return skills[:10]  # Return max 10
-
-    except Exception as e:
-        logger.error(f"[ai] Error generating skills: {e}")
-        return get_fallback_skills(target_role)
+    result = _call_with_retry(_call, fallback=None)
+    if result:
+        logger.info(f"[ai] Generated {len(result)} pro skills")
+        return result
+    return get_fallback_skills(target_role)
 
 
 def generate_summary(answers: Dict, tier: str = "free") -> str:
@@ -159,17 +168,14 @@ def generate_summary(answers: Dict, tier: str = "free") -> str:
 
 def _generate_summary_basic(answers: Dict) -> str:
     """Basic summary generation for free tier."""
-    try:
-        basics = answers.get("basics", {})
-        target_role = answers.get("target_role", "")
-        skills = answers.get("skills", [])[:3]  # Just top 3 skills
-        experiences = answers.get("experiences", [])
+    basics = answers.get("basics", {})
+    target_role = answers.get("target_role", "")
+    skills = answers.get("skills", [])[:3]
+    experiences = answers.get("experiences", [])
+    exp_count = len(experiences)
+    company = experiences[0].get("company", "").strip() if experiences else ""
 
-        # Simple context
-        exp_count = len(experiences)
-        company = experiences[0].get("company", "").strip() if experiences else ""
-
-        prompt = f"""Write a brief 2-sentence professional summary for a {target_role}.
+    prompt = f"""Write a brief 2-sentence professional summary for a {target_role}.
 
 Their experience: {exp_count} position(s){f' at {company}' if company else ''}
 Key skills: {', '.join(skills) if skills else 'various skills'}
@@ -182,8 +188,9 @@ Requirements:
 Example: "Experienced data analyst with strong analytical skills and expertise in SQL and Python. Proven ability to transform complex data into actionable business insights."
 """
 
-        logger.info("[ai] Generating basic summary")
+    logger.info("[ai] Generating basic summary")
 
+    def _call():
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -191,62 +198,50 @@ Example: "Experienced data analyst with strong analytical skills and expertise i
                 {"role": "user", "content": prompt}
             ],
             temperature=0.8,
-            max_tokens=150
+            max_tokens=150,
         )
+        text = response.choices[0].message.content.strip()
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+        return text
 
-        summary = response.choices[0].message.content.strip()
-        if summary.startswith('"') and summary.endswith('"'):
-            summary = summary[1:-1]
-
-        logger.info(f"[ai] Generated basic summary")
-        return summary
-
-    except Exception as e:
-        logger.error(f"[ai] Error generating basic summary: {e}")
-        return get_fallback_summary(answers)
+    result = _call_with_retry(_call, fallback=None)
+    if result:
+        logger.info("[ai] Generated basic summary")
+        return result
+    return get_fallback_summary(answers)
 
 
 def _generate_summary_pro(answers: Dict) -> str:
     """Enhanced summary generation for pro tier - detailed analysis."""
-    try:
-        basics = answers.get("basics", {})
-        target_role = answers.get("target_role", "")
-        skills = answers.get("skills", [])
-        experiences = answers.get("experiences", [])
-        education = answers.get("education", [])
+    target_role = answers.get("target_role", "")
+    skills = answers.get("skills", [])
+    experiences = answers.get("experiences", [])
+    education = answers.get("education", [])
 
-        # Build rich context
-        context_parts = []
+    context_parts = []
+    years_exp = len(experiences)
+    if experiences:
+        context_parts.append(f"Target Role: {target_role}")
+        context_parts.append(f"Experience Level: {years_exp} position(s)")
+    if skills:
+        context_parts.append(f"\nKey Skills: {', '.join(skills)}")
+    if experiences:
+        context_parts.append("\nWork Experience with Achievements:")
+        for exp in experiences[:2]:
+            context_parts.append(
+                f"- {exp.get('role', '')} at {exp.get('company', '')} "
+                f"({exp.get('start', '')} - {exp.get('end', '')})"
+            )
+            for bullet in exp.get("bullets", [])[:3]:
+                context_parts.append(f"  • {bullet}")
+    if education:
+        context_parts.append("\nEducation:")
+        for edu in education[:1]:
+            context_parts.append(f"- {edu.get('details', '')}")
+    context = "\n".join(context_parts)
 
-        # Calculate years of experience
-        years_exp = len(experiences)
-        if experiences:
-            context_parts.append(f"Target Role: {target_role}")
-            context_parts.append(f"Experience Level: {years_exp} position(s)")
-
-        if skills:
-            context_parts.append(f"\nKey Skills: {', '.join(skills)}")
-
-        if experiences:
-            context_parts.append("\nWork Experience with Achievements:")
-            for exp in experiences[:2]:
-                role = exp.get("role", "")
-                company = exp.get("company", "")
-                start = exp.get("start", "")
-                end = exp.get("end", "")
-                context_parts.append(f"- {role} at {company} ({start} - {end})")
-                bullets = exp.get("bullets", [])
-                for bullet in bullets[:3]:
-                    context_parts.append(f"  • {bullet}")
-
-        if education:
-            context_parts.append("\nEducation:")
-            for edu in education[:1]:
-                context_parts.append(f"- {edu.get('details', '')}")
-
-        context = "\n".join(context_parts)
-
-        prompt = f"""Based on the following resume information, write a compelling, senior-level professional summary.
+    prompt = f"""Based on the following resume information, write a compelling, senior-level professional summary.
 
 {context}
 
@@ -263,8 +258,9 @@ PRO TIER Requirements:
 Example: "Senior Data Analyst with 5+ years of experience transforming complex datasets into actionable business insights that drove $2M+ in strategic decisions. Built automated ETL pipelines processing 5M+ records daily and created executive dashboards in Power BI, reducing manual work by 70% while improving data quality from 85% to 98%. Expert in Python, SQL, and Power BI with proven ability to lead cross-functional data initiatives and communicate insights to C-level stakeholders."
 """
 
-        logger.info("[ai] Generating professional summary")
+    logger.info("[ai] Generating pro summary")
 
+    def _call():
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -272,21 +268,18 @@ Example: "Senior Data Analyst with 5+ years of experience transforming complex d
                 {"role": "user", "content": prompt}
             ],
             temperature=0.8,
-            max_tokens=250
+            max_tokens=250,
         )
+        text = response.choices[0].message.content.strip()
+        if text.startswith('"') and text.endswith('"'):
+            text = text[1:-1]
+        return text
 
-        summary = response.choices[0].message.content.strip()
-
-        # Remove quotes if AI added them
-        if summary.startswith('"') and summary.endswith('"'):
-            summary = summary[1:-1]
-
-        logger.info(f"[ai] Generated summary: {summary[:100]}...")
-        return summary
-
-    except Exception as e:
-        logger.error(f"[ai] Error generating summary: {e}")
-        return get_fallback_summary(answers)
+    result = _call_with_retry(_call, fallback=None)
+    if result:
+        logger.info(f"[ai] Generated pro summary: {result[:100]}...")
+        return result
+    return get_fallback_summary(answers)
 
 
 def get_fallback_skills(target_role: str) -> List[str]:
@@ -321,9 +314,8 @@ def revamp_resume(original_content: str, tier: str = "free") -> str:
         logger.warning("[ai] OpenAI client not configured, returning original")
         return original_content
 
-    try:
-        if tier == "pro":
-            prompt = f"""You are a professional resume writer. Improve the following resume content:
+    if tier == "pro":
+        prompt = f"""You are a professional resume writer. Improve the following resume content:
 
 {original_content}
 
@@ -338,8 +330,8 @@ PRO TIER Requirements:
 - Return the improved content in a clear, organized format
 
 Return the improved resume content."""
-        else:
-            prompt = f"""You are a resume editor. Improve the following resume content:
+    else:
+        prompt = f"""You are a resume editor. Improve the following resume content:
 
 {original_content}
 
@@ -353,8 +345,9 @@ FREE TIER Requirements:
 
 Return the improved resume content."""
 
-        logger.info(f"[ai] Revamping resume (tier: {tier})")
+    logger.info(f"[ai] Revamping resume (tier: {tier})")
 
+    def _call():
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -362,16 +355,15 @@ Return the improved resume content."""
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=1500
+            max_tokens=1500,
         )
+        return response.choices[0].message.content.strip()
 
-        improved = response.choices[0].message.content.strip()
-        logger.info(f"[ai] Resume revamped successfully")
-        return improved
-
-    except Exception as e:
-        logger.error(f"[ai] Error revamping resume: {e}")
-        return original_content
+    result = _call_with_retry(_call, fallback=None)
+    if result:
+        logger.info("[ai] Resume revamped successfully")
+        return result
+    return original_content
 
 
 def get_fallback_summary(answers: Dict) -> str:
@@ -409,8 +401,7 @@ def detect_onboarding_intent(user_message: str) -> Dict[str, Any]:
         logger.warning("[ai] OpenAI not configured, returning unclear intent")
         return {"intent": "unclear", "confidence": "low", "extracted_role": None, "extracted_company": None}
 
-    try:
-        prompt = f"""You are an assistant helping classify a job seeker's intent.
+    prompt = f"""You are an assistant helping classify a job seeker's intent.
 Based on their message, return ONLY a JSON object with these exact keys:
 - "intent": one of "resume", "cv", "cover_letter", "bundle", "unclear"
 - "confidence": "high" or "low"
@@ -419,6 +410,9 @@ Based on their message, return ONLY a JSON object with these exact keys:
 
 Message: "{user_message}"
 """
+    fallback = {"intent": "unclear", "confidence": "low", "extracted_role": None, "extracted_company": None}
+
+    def _call():
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -426,14 +420,11 @@ Message: "{user_message}"
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3,
-            max_tokens=150
+            max_tokens=150,
         )
         content = response.choices[0].message.content.strip()
         json_match = re.search(r"\{[^{}]*\}", content, re.DOTALL)
-        if json_match:
-            data = json.loads(json_match.group())
-        else:
-            data = json.loads(content)
+        data = json.loads(json_match.group()) if json_match else json.loads(content)
         intent = data.get("intent", "unclear")
         if intent not in ("resume", "cv", "cover_letter", "bundle", "unclear"):
             intent = "unclear"
@@ -441,8 +432,8 @@ Message: "{user_message}"
             "intent": intent,
             "confidence": data.get("confidence", "low") or "low",
             "extracted_role": data.get("extracted_role"),
-            "extracted_company": data.get("extracted_company")
+            "extracted_company": data.get("extracted_company"),
         }
-    except Exception as e:
-        logger.error(f"[ai] Intent detection failed: {e}")
-        return {"intent": "unclear", "confidence": "low", "extracted_role": None, "extracted_company": None}
+
+    result = _call_with_retry(_call, fallback=fallback)
+    return result

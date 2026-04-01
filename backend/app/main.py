@@ -85,9 +85,12 @@ async def _register_telegram_webhook() -> None:
         return
     webhook_url = f"{settings.public_url.rstrip('/')}/webhooks/telegram"
     api_url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/setWebhook"
+    payload: dict = {"url": webhook_url}
+    if settings.telegram_webhook_secret:
+        payload["secret_token"] = settings.telegram_webhook_secret
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.post(api_url, json={"url": webhook_url})
+            r = await client.post(api_url, json=payload)
             data = r.json()
         if data.get("ok"):
             logger.info(f"[BOOT] Telegram webhook set: {webhook_url}")
@@ -101,6 +104,17 @@ async def _register_telegram_webhook() -> None:
 async def startup_event():
     """Check required env and register webhook when PUBLIC_URL is public."""
     _configure_structured_logging()
+    if settings.app_env == "production":
+        missing = []
+        if not settings.paystack_secret:
+            missing.append("PAYSTACK_SECRET")
+        if not settings.telegram_webhook_secret:
+            missing.append("TELEGRAM_WEBHOOK_SECRET")
+        if missing:
+            raise RuntimeError(
+                f"Required production secrets not set: {', '.join(missing)}. "
+                "App will not start."
+            )
     required = [
         ("TELEGRAM_BOT_TOKEN", settings.telegram_bot_token),
     ]
@@ -130,30 +144,29 @@ async def health():
 
 
 @app.get("/download/{job_id}/{filename}")
-async def download_file(job_id: str, filename: str):
-    """
-    Serve generated documents for download.
+async def download_file(job_id: str, filename: str, token: str = "", db=Depends(get_db)):
+    """Serve generated documents. Requires a valid job_id that exists in the DB."""
+    from app.models import Job
 
-    Args:
-        job_id: Job UUID
-        filename: Document filename
+    import re
+    if not re.match(r'^[a-f0-9\-]{36}$', job_id):
+        raise HTTPException(status_code=400, detail="Invalid job ID format")
 
-    Returns:
-        FileResponse with the document
-    """
-    # Construct file path
-    file_path = Path("output") / "jobs" / job_id / filename
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="File not found")
 
-    # Check if file exists
+    safe_filename = Path(filename).name
+    file_path = Path("output") / "jobs" / job_id / safe_filename
+
     if not file_path.exists():
         logger.error(f"[download] File not found: {file_path}")
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Serve the file
     logger.info(f"[download] Serving file: {file_path}")
     return FileResponse(
         path=str(file_path),
-        filename=filename,
+        filename=safe_filename,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 

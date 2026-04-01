@@ -3,6 +3,8 @@ CareerBuddy - Configuration
 Author: Sir Dave
 """
 import os
+from typing import Optional
+
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -20,6 +22,8 @@ class Settings(BaseModel):
     # Telegram Bot
     telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_bot_username: str = os.getenv("TELEGRAM_BOT_USERNAME", "CareerBuddyBot")
+    # Env: TELEGRAM_WEBHOOK_SECRET — required in production (SEC-001); optional locally
+    telegram_webhook_secret: Optional[str] = os.getenv("TELEGRAM_WEBHOOK_SECRET") or None
     admin_telegram_ids: list[str] = [
         id.strip() for id in os.getenv("ADMIN_TELEGRAM_IDS", "").split(",")
         if id.strip()

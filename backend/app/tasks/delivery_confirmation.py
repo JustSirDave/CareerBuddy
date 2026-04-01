@@ -12,6 +12,22 @@ from app.services.telegram import reply_text
 
 logger = logging.getLogger(__name__)
 
+
+def _send_async(coro):
+    """Safely run an async coroutine from a sync/threaded scheduler context."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            future = pool.submit(asyncio.run, coro)
+            future.result(timeout=30)
+    else:
+        asyncio.run(coro)
+
 CONFIRMATION_MESSAGES = {
     "resume": (
         "Hey {first_name}! 👋\n\n"
@@ -76,7 +92,7 @@ def send_pending_delivery_confirmations(db: Session) -> None:
             if not first_name:
                 first_name = "there"
 
-            asyncio.run(
+            _send_async(
                 reply_text(
                     user.telegram_user_id,
                     message_template.format(first_name=first_name),

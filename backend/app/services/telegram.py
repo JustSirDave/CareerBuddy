@@ -372,6 +372,4 @@ Click the button below to pay securely with Paystack:"""
         return {"error": str(e)}
 
 
-# Legacy function names for backward compatibility during refactoring
-upload_media = None  # Not needed for Telegram
 

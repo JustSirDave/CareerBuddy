@@ -62,15 +62,8 @@ MULTI_STEP_SECTIONS = ["experiences"]
 
 
 def _generate_filename(job: Job) -> str:
-    """Generate user-friendly filename."""
-    answers = job.answers or {}
-    basics = answers.get("basics", {}) or {}
-    name = basics.get("name", "Document")
-    clean_name = re.sub(r'[<>:"/\\|?*]', "", str(name))
-    doc_map = {"resume": "Resume", "cv": "CV", "cover": "Cover Letter"}
-    doc_type = doc_map.get(job.type, "Document")
-    ts = datetime.now().strftime("%Y%m%d_%H%M")
-    return f"{clean_name} - {doc_type}_{ts}.docx"
+    from app.utils import generate_filename
+    return generate_filename(job)
 
 
 def _get_latest_done_job(db: Session, user_id: str) -> Job | None:

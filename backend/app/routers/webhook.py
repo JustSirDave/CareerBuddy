@@ -4,7 +4,7 @@ Handles Telegram and Paystack webhooks
 Author: Sir Dave
 """
 from pathlib import Path
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -15,12 +15,21 @@ from app.db import get_db
 from app.models.user import User
 from app.models.job import Job
 from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request, send_template_selection, send_onboarding_continue_menu
-from app.services.router import handle_inbound
+from app.services.conversation_router import handle_inbound
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
-@router.post("/telegram")
+def verify_telegram_webhook_secret(request: Request) -> None:
+    """SEC-001: reject requests when a secret is configured but header is missing or wrong."""
+    secret = settings.telegram_webhook_secret
+    if secret:
+        token = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+        if token != secret:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+
+@router.post("/telegram", dependencies=[Depends(verify_telegram_webhook_secret)])
 async def telegram_webhook(request: Request, db=Depends(get_db)):
     """
     Telegram Bot webhook endpoint.
@@ -237,7 +246,7 @@ async def handle_revamp_upload(chat_id: int | str, file_path: Path, file_type: s
         user: User object
     """
     try:
-        from app.services import document_parser, router
+        from app.services import document_parser, conversation_router
         from sqlalchemy.orm.attributes import flag_modified
 
         # Show processing message
@@ -269,7 +278,7 @@ async def handle_revamp_upload(chat_id: int | str, file_path: Path, file_type: s
 
         logger.info(f"[handle_revamp_upload] Stored content in job.id={job.id}, advancing to processing")
 
-        reply = await router.handle_revamp(db, job, "")
+        reply = await conversation_router.handle_revamp(db, job, "")
 
         if reply:
             await reply_text(chat_id, reply)
@@ -707,10 +716,27 @@ def extract_telegram_message(payload: dict) -> tuple[int | None, str | None, int
 async def paystack_webhook(request: Request, db=Depends(get_db)):
     """
     Paystack webhook endpoint.
-    Uses confirm_payment_and_award_credits for idempotent credit granting.
+    Verifies HMAC signature, then uses confirm_payment_and_award_credits.
     """
+    import hmac
+    import hashlib
+
+    body = await request.body()
+
+    if settings.paystack_secret:
+        signature = request.headers.get("x-paystack-signature", "")
+        expected = hmac.new(
+            settings.paystack_secret.encode(),
+            body,
+            hashlib.sha512,
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            logger.warning("[paystack_webhook] Invalid signature — rejecting request")
+            return JSONResponse(status_code=401, content={"error": "invalid signature"})
+
     try:
-        payload = await request.json()
+        import json as _json
+        payload = _json.loads(body)
         logger.info(f"[paystack_webhook] Received webhook: {payload.get('event')}")
 
         event = payload.get("event")
