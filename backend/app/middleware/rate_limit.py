@@ -90,8 +90,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if request.url.path in self.excluded_paths:
             return await call_next(request)
         
-        # Get identifier (IP address or user ID from headers)
-        identifier = request.client.host if request.client else "unknown"
+        # Get identifier: Telegram user ID when available, else IP
+        try:
+            body = await request.json()
+            identifier = str(
+                body.get("message", {}).get("from", {}).get("id")
+                or body.get("callback_query", {}).get("from", {}).get("id")
+                or (request.client.host if request.client else "unknown")
+            )
+        except Exception:
+            identifier = request.client.host if request.client else "unknown"
         
         # Check rate limit
         allowed, reason = self.rate_limiter.check_rate_limit(identifier)

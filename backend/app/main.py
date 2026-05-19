@@ -104,6 +104,15 @@ async def _register_telegram_webhook() -> None:
 async def startup_event():
     """Check required env and register webhook when PUBLIC_URL is public."""
     _configure_structured_logging()
+    from alembic.config import Config
+    from alembic import command as alembic_command
+    try:
+        alembic_cfg = Config("alembic.ini")
+        alembic_command.upgrade(alembic_cfg, "head")
+        logger.info("Database migrations applied")
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+        raise
     if settings.app_env == "production":
         missing = []
         if not settings.paystack_secret:
@@ -157,7 +166,7 @@ async def download_file(job_id: str, filename: str, token: str = "", db=Depends(
         raise HTTPException(status_code=404, detail="File not found")
 
     safe_filename = Path(filename).name
-    file_path = Path("output") / "jobs" / job_id / safe_filename
+    file_path = Path(settings.output_dir) / job_id / safe_filename
 
     if not file_path.exists():
         logger.error(f"[download] File not found: {file_path}")

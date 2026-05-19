@@ -66,6 +66,9 @@ async def _process_telegram_update(payload: dict, db):
     if document and document.get("mime_type") in supported_mimes:
         # Extract chat info for document upload
         chat = message.get("chat", {})
+        if chat.get("type") != "private":
+            logger.debug(f"[telegram_webhook] Ignoring document from non-private chat: {chat.get('type')}")
+            return
         chat_id = chat.get("id")
         from_user = message.get("from", {})
         username = from_user.get("username")
@@ -311,7 +314,7 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
     """
     try:
         # Find the file on disk
-        file_path = Path("output") / "jobs" / job_id / filename
+        file_path = Path(settings.output_dir) / job_id / filename
 
         if not file_path.exists():
             logger.error(f"[telegram_webhook] Document file not found: {file_path}")
@@ -448,7 +451,7 @@ async def send_pdf_to_user(chat_id: int | str, user_id: str, db: Session):
             except Exception as e:
                 logger.error(f"[send_pdf] Direct PDF generation failed: {e}")
                 # Fallback to LibreOffice conversion as last resort
-                job_output_dir = Path("output") / "jobs" / latest_job.id
+                job_output_dir = Path(settings.output_dir) / latest_job.id
                 if job_output_dir.exists():
                     docx_files = list(job_output_dir.glob("*.docx"))
                     if docx_files:

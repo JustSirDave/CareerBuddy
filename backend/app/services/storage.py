@@ -20,8 +20,9 @@ def save_file_locally(job_id: str, file_bytes: bytes, filename: str) -> str:
     Returns:
         Local file path
     """
+    from app.config import settings
     # Create directory structure
-    output_dir = Path("output") / "jobs" / job_id
+    output_dir = Path(settings.output_dir) / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Save file

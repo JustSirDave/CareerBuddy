@@ -34,13 +34,10 @@ def seen_or_mark(key: str, ttl: int = 3600) -> bool:
         return False
 
     try:
-        # Check if key exists
-        if r.exists(key):
+        result = r.set(key, "1", nx=True, ex=ttl)
+        if result is None:
             logger.debug(f"[idempotency] Key '{key}' already seen")
             return True
-
-        # Mark as seen
-        r.setex(key, ttl, "1")
         logger.debug(f"[idempotency] Marked key '{key}' as seen (TTL: {ttl}s)")
         return False
 

@@ -41,6 +41,9 @@ class Settings(BaseModel):
     # AI/LLM
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
 
+    # Storage
+    output_dir: str = os.getenv("OUTPUT_DIR", "output/jobs")
+
     # Payments
     paystack_secret: str = os.getenv("PAYSTACK_SECRET", "")
 
