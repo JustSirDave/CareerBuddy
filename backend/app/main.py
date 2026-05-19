@@ -104,15 +104,6 @@ async def _register_telegram_webhook() -> None:
 async def startup_event():
     """Check required env and register webhook when PUBLIC_URL is public."""
     _configure_structured_logging()
-    from alembic.config import Config
-    from alembic import command as alembic_command
-    try:
-        alembic_cfg = Config("alembic.ini")
-        alembic_command.upgrade(alembic_cfg, "head")
-        logger.info("Database migrations applied")
-    except Exception as e:
-        logger.error(f"Migration failed: {e}")
-        raise
     if settings.app_env == "production":
         missing = []
         if not settings.paystack_secret:
@@ -154,12 +145,16 @@ async def health():
 
 @app.get("/download/{job_id}/{filename}")
 async def download_file(job_id: str, filename: str, token: str = "", db=Depends(get_db)):
-    """Serve generated documents. Requires a valid job_id that exists in the DB."""
+    """Serve generated documents. Requires a valid signed token."""
     from app.models import Job
+    from app.utils import verify_download_token
 
     import re
     if not re.match(r'^[a-f0-9\-]{36}$', job_id):
         raise HTTPException(status_code=400, detail="Invalid job ID format")
+
+    if not verify_download_token(job_id, token, settings.download_secret):
+        raise HTTPException(status_code=403, detail="Invalid or expired download token")
 
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:

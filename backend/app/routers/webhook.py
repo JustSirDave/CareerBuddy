@@ -14,7 +14,7 @@ from app.services.idempotency import seen_or_mark
 from app.db import get_db
 from app.models.user import User
 from app.models.job import Job
-from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request, send_template_selection, send_onboarding_continue_menu
+from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request, send_template_selection, send_onboarding_continue_menu, send_format_menu
 from app.services.conversation_router import handle_inbound
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -124,6 +124,11 @@ async def _process_telegram_update(payload: dict, db):
         return
     if reply == "__SHOW_TEMPLATE_MENU__":
         await send_template_selection(chat_id, "credits")
+        return
+    if reply and reply.startswith("__SHOW_FORMAT_MENU__|"):
+        parts = reply.split("|", 1)
+        if len(parts) == 2:
+            await send_format_menu(chat_id, parts[1])
         return
     if reply:
         await reply_text(chat_id, reply)
@@ -237,70 +242,9 @@ async def handle_document_upload(chat_id: int | str, document: dict, db: Session
 
 
 async def handle_revamp_upload(chat_id: int | str, file_path: Path, file_type: str, job: Job, db: Session, user: User):
-    """
-    Process uploaded resume for revamp feature.
-
-    Args:
-        chat_id: Telegram chat ID
-        file_path: Path to uploaded file
-        file_type: File type (docx, pdf)
-        job: Active revamp job
-        db: Database session
-        user: User object
-    """
-    try:
-        from app.services import document_parser, conversation_router
-        from sqlalchemy.orm.attributes import flag_modified
-
-        # Show processing message
-        await reply_text(chat_id, 
-                       f"⏳ *Analyzing your resume...*\n\n"
-                       f"📄 Extracting content from {file_type.upper()} file\n"
-                       f"🤖 This may take 30-60 seconds\n\n"
-                       f"_Please wait..._")
-
-        # Parse the document
-        parsed_data = document_parser.parse_document(file_path, file_type)
-
-        logger.info(f"[handle_revamp_upload] Parsed {file_path.name}: "
-                   f"{parsed_data['word_count']} words, "
-                   f"{len(parsed_data['sections'])} sections")
-
-        # Store parsed content in job
-        answers = job.answers if isinstance(job.answers, dict) else {}
-        answers["original_content"] = parsed_data["content"]
-        answers["file_type"] = file_type
-        answers["file_name"] = parsed_data["file_name"]
-        answers["word_count"] = parsed_data["word_count"]
-        answers["sections_detected"] = list(parsed_data["sections"].keys())
-        answers["_step"] = "revamp_processing"
-
-        job.answers = answers
-        flag_modified(job, "answers")
-        db.commit()
-
-        logger.info(f"[handle_revamp_upload] Stored content in job.id={job.id}, advancing to processing")
-
-        reply = await conversation_router.handle_revamp(db, job, "")
-
-        if reply:
-            await reply_text(chat_id, reply)
-
-    except ValueError as ve:
-        # Validation error (e.g., empty document)
-        logger.warning(f"[handle_revamp_upload] Validation error: {ve}")
-        await reply_text(chat_id, f"❌ *Document Error*\n\n{str(ve)}")
-
-    except Exception as e:
-        logger.error(f"[handle_revamp_upload] Error processing revamp upload: {e}")
-        await reply_text(chat_id, 
-                       f"❌ *Processing Error*\n\n"
-                       f"Sorry, we couldn't process your resume.\n\n"
-                       f"Please try:\n"
-                       f"• Uploading a different file\n"
-                       f"• Saving your resume in .docx format\n"
-                       f"• Typing /reset to start over\n\n"
-                       f"_Error: {str(e)}_")
+    """Delegate to flows/revamp.py."""
+    from app.flows import revamp as revamp_flow
+    await revamp_flow.process_revamp_upload(chat_id, file_path, file_type, job, db, user)
 
 
 async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, db=None):
@@ -361,8 +305,10 @@ Good luck with your job search! 🚀"""
             return
 
         # Fallback to download link
+        from app.utils import generate_download_token
         file_size_kb = file_path.stat().st_size // 1024
-        download_url = f"{settings.public_url}/download/{job_id}/{filename}"
+        token = generate_download_token(job_id, settings.download_secret)
+        download_url = f"{settings.public_url}/download/{job_id}/{filename}?token={token}"
         doc_type = filename.split("_")[0].capitalize()
 
         message = f"""✅ Your {doc_type} is ready!
@@ -635,6 +581,55 @@ If payment is confirmed, you'll be able to continue creating your document.
 
 _This may take a few moments._""")
             # The actual payment verification happens via webhook
+
+        elif data.startswith("format_docx|") or data.startswith("format_pdf|"):
+            fmt = "pdf" if data.startswith("format_pdf|") else "docx"
+            job_id = data.split("|", 1)[1] if "|" in data else None
+            if not job_id:
+                await reply_text(chat_id, "❌ Session expired. Please type /reset.")
+                return {"ok": True}
+
+            job = db.query(Job).filter(Job.id == job_id).first()
+            if not job:
+                await reply_text(chat_id, "❌ Session expired. Please type /reset.")
+                return {"ok": True}
+
+            from app.services import renderer, storage, pdf_renderer
+            from app.utils import generate_filename
+            from sqlalchemy.orm.attributes import flag_modified
+            from datetime import datetime
+
+            answers = job.answers or {}
+            try:
+                if fmt == "pdf":
+                    template = answers.get("template", "template_1")
+                    pdf_bytes = pdf_renderer.render_pdf_from_data(answers, template)
+                    doc_type = job.type or "document"
+                    pdf_filename = f"{doc_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                    answers["_step"] = "done"
+                    job.status = "preview_ready"
+                    job.answers = answers
+                    flag_modified(job, "answers")
+                    db.commit()
+                    await send_document(chat_id, pdf_bytes, pdf_filename, caption="📄 *Your PDF is Ready!*")
+                    await reply_text(chat_id, "✅ PDF delivered! Type /reset to create another document.")
+                else:
+                    if job.type == "cv":
+                        doc_bytes = renderer.render_cv(job)
+                    else:
+                        doc_bytes = renderer.render_resume(job)
+                    filename = generate_filename(job)
+                    file_path = storage.save_file_locally(job.id, doc_bytes, filename)
+                    job.draft_text = file_path
+                    job.status = "preview_ready"
+                    answers["_step"] = "done"
+                    job.answers = answers
+                    flag_modified(job, "answers")
+                    db.commit()
+                    await send_document_to_user(chat_id, job.id, filename, db)
+            except Exception as e:
+                logger.error(f"[format_callback] Error rendering {fmt}: {e}")
+                await reply_text(chat_id, f"❌ Document generation failed. Please try /reset and try again.")
 
         elif data == "cancel":
             await reply_text(chat_id, "❌ *Cancelled*\n\nNo problem! Type /start when you're ready to create a document.")

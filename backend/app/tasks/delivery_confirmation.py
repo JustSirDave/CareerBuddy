@@ -2,7 +2,6 @@
 Delivery confirmation task.
 Sends a 24hr follow-up message after document delivery.
 """
-import asyncio
 import logging
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -11,22 +10,6 @@ from app.models import Job, User
 from app.services.telegram import reply_text
 
 logger = logging.getLogger(__name__)
-
-
-def _send_async(coro):
-    """Safely run an async coroutine from a sync/threaded scheduler context."""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-
-    if loop and loop.is_running():
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            future = pool.submit(asyncio.run, coro)
-            future.result(timeout=30)
-    else:
-        asyncio.run(coro)
 
 CONFIRMATION_MESSAGES = {
     "resume": (
@@ -56,7 +39,7 @@ CONFIRMATION_MESSAGES = {
 }
 
 
-def send_pending_delivery_confirmations(db: Session) -> None:
+async def send_pending_delivery_confirmations(db: Session) -> None:
     """
     Called by scheduler every 30 minutes.
     Finds jobs completed 23–25 hours ago with no follow-up sent yet.
@@ -92,11 +75,9 @@ def send_pending_delivery_confirmations(db: Session) -> None:
             if not first_name:
                 first_name = "there"
 
-            _send_async(
-                reply_text(
-                    user.telegram_user_id,
-                    message_template.format(first_name=first_name),
-                )
+            await reply_text(
+                user.telegram_user_id,
+                message_template.format(first_name=first_name),
             )
 
             job.delivery_confirmation_sent = True

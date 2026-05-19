@@ -14,9 +14,15 @@ from app.config import settings
 MAX_AI_RETRIES = 2
 AI_RETRY_DELAY = 1.5  # seconds
 
-client = None
-if settings.openai_api_key:
-    client = OpenAI(api_key=settings.openai_api_key)
+_client = None
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        if settings.openai_api_key:
+            _client = OpenAI(api_key=settings.openai_api_key)
+    return _client
 
 
 def _call_with_retry(fn, *args, fallback=None, **kwargs):
@@ -48,7 +54,7 @@ def generate_skills(target_role: str, basics: Dict, experiences: List[Dict], tie
     Returns:
         List of 8-10 suggested skills
     """
-    if not client:
+    if not _get_client():
         logger.warning("[ai] OpenAI client not configured, returning fallback skills")
         return get_fallback_skills(target_role)
 
@@ -72,7 +78,7 @@ Example format: Python, Data Analysis, SQL, Communication, Problem Solving"""
     logger.info(f"[ai] Generating basic skills for role: {target_role}")
 
     def _call():
-        response = client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a resume expert."},
@@ -125,7 +131,7 @@ Example: Python, SQL, Power BI, ETL Pipelines, Data Modeling, Statistical Analys
     logger.info(f"[ai] Generating pro skills for role: {target_role}")
 
     def _call():
-        response = client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a professional resume writer helping candidates identify relevant skills."},
@@ -155,7 +161,7 @@ def generate_summary(answers: Dict, tier: str = "free") -> str:
     Returns:
         A 2-3 sentence professional summary
     """
-    if not client:
+    if not _get_client():
         logger.warning("[ai] OpenAI client not configured, returning fallback summary")
         return get_fallback_summary(answers)
 
@@ -191,7 +197,7 @@ Example: "Experienced data analyst with strong analytical skills and expertise i
     logger.info("[ai] Generating basic summary")
 
     def _call():
-        response = client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a professional resume writer."},
@@ -261,7 +267,7 @@ Example: "Senior Data Analyst with 5+ years of experience transforming complex d
     logger.info("[ai] Generating pro summary")
 
     def _call():
-        response = client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a professional resume writer who creates compelling, natural-sounding summaries."},
@@ -310,7 +316,7 @@ def revamp_resume(original_content: str, tier: str = "free") -> str:
     Returns:
         Improved resume content
     """
-    if not client:
+    if not _get_client():
         logger.warning("[ai] OpenAI client not configured, returning original")
         return original_content
 
@@ -348,7 +354,7 @@ Return the improved resume content."""
     logger.info(f"[ai] Revamping resume (tier: {tier})")
 
     def _call():
-        response = client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a professional resume writer who improves resume content."},
@@ -397,7 +403,7 @@ def detect_onboarding_intent(user_message: str) -> Dict[str, Any]:
     Classify user's onboarding message into document intent.
     Returns: {intent, confidence, extracted_role, extracted_company}
     """
-    if not client:
+    if not _get_client():
         logger.warning("[ai] OpenAI not configured, returning unclear intent")
         return {"intent": "unclear", "confidence": "low", "extracted_role": None, "extracted_company": None}
 
@@ -413,7 +419,7 @@ Message: "{user_message}"
     fallback = {"intent": "unclear", "confidence": "low", "extracted_role": None, "extracted_company": None}
 
     def _call():
-        response = client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a resume expert. Return only valid JSON."},

@@ -47,5 +47,8 @@ class Settings(BaseModel):
     # Payments
     paystack_secret: str = os.getenv("PAYSTACK_SECRET", "")
 
+    # Security
+    download_secret: str = os.getenv("DOWNLOAD_SECRET", "")
+
 
 settings = Settings()

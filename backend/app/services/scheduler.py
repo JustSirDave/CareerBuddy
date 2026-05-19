@@ -2,21 +2,21 @@
 Background task scheduler.
 """
 import logging
-from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 from app.db import get_db_context
 from app.tasks.delivery_confirmation import send_pending_delivery_confirmations
 
 logger = logging.getLogger(__name__)
-scheduler = BackgroundScheduler()
+scheduler = AsyncIOScheduler()
 
 
-def _run_delivery_confirmations():
+async def _run_delivery_confirmations():
     """Run delivery confirmation task."""
     try:
         with get_db_context() as db:
-            send_pending_delivery_confirmations(db)
+            await send_pending_delivery_confirmations(db)
     except Exception as e:
         logger.error(f"Delivery confirmation task failed: {e}")
 
@@ -35,5 +35,5 @@ def start_scheduler():
 
 def stop_scheduler():
     """Stop the scheduler."""
-    scheduler.shutdown()
+    scheduler.shutdown(wait=False)
     logger.info("Scheduler stopped")

@@ -315,6 +315,34 @@ _All templates are ATS-compliant and professionally formatted._"""
         return {"error": str(e)}
 
 
+async def send_format_menu(chat_id: int | str, job_id: str) -> dict:
+    """Ask the user to choose DOCX or PDF delivery format."""
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "📄 Word (.docx)", "callback_data": f"format_docx|{job_id}"},
+                {"text": "📕 PDF", "callback_data": f"format_pdf|{job_id}"},
+            ]
+        ]
+    }
+    payload = {
+        "chat_id": chat_id,
+        "text": "🎉 *Almost done!* Which format would you like your document in?",
+        "parse_mode": "Markdown",
+        "reply_markup": keyboard,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload)
+            if r.status_code >= 400:
+                logger.error(f"Telegram send format menu failed: {r.status_code} {r.text}")
+            return r.json() if r.content else {}
+    except Exception as e:
+        logger.error(f"Telegram send format menu exception: {e}")
+        return {"error": str(e)}
+
+
 async def send_payment_request(chat_id: int | str, payment_url: str, amount: int) -> dict:
     """
     Send payment request with inline keyboard button.
