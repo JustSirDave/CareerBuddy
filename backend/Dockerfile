@@ -5,21 +5,29 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps (keep minimal; gcc only if needed later)
-# Install LibreOffice for PDF conversion
+# Install build-essential and curl first (smaller download), then clean cache
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
-    libreoffice-writer \
-    libreoffice-core \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Copy pyproject.toml and install dependencies
+# Copy pyproject.toml and install dependencies (needs build-essential for C extensions)
 COPY pyproject.toml ./
 RUN pip install --upgrade pip && \
     pip install poetry && \
     poetry config virtualenvs.create false && \
     poetry install --only main --no-interaction --no-ansi --no-root
+
+# Remove build-essential after Python deps are compiled to free disk space
+RUN apt-get purge -y --auto-remove build-essential && rm -rf /var/lib/apt/lists/*
+
+# Install LibreOffice for PDF conversion (large package, needs its own layer)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-writer \
+    libreoffice-core \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # With build context = ./backend, the app folder is right here
 COPY app ./app
