@@ -29,11 +29,11 @@ class Settings(BaseModel):
         if id.strip()
     ]
 
-    # Database
+    # Database — normalise scheme so SQLAlchemy uses psycopg v3, not psycopg2
     database_url: str = os.getenv(
         "DATABASE_URL",
         "postgresql://postgres:postgres@postgres:5432/buddy"
-    )
+    ).replace("postgresql://", "postgresql+psycopg://", 1).replace("postgres://", "postgresql+psycopg://", 1)
 
     # Redis
     redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")

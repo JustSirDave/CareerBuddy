@@ -18,8 +18,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Override sqlalchemy.url from environment variable
+# Override sqlalchemy.url from environment variable — use psycopg v3 scheme
 database_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/buddy")
+database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1).replace("postgres://", "postgresql+psycopg://", 1)
 config.set_main_option("sqlalchemy.url", database_url)
 
 target_metadata = Base.metadata
