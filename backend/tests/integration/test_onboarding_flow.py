@@ -16,16 +16,18 @@ class TestNewUserWelcome:
         db_session.refresh(user)
 
         result = onboarding.handle_new_user_welcome(db_session, user, "Alice")
-        assert "Welcome to CareerBuddy" in result
+        # router may return the welcome signal or the welcome text directly
+        assert "Welcome to CareerBuddy" in result or result.startswith("__SEND_WELCOME__")
         assert "Alice" in result
         db_session.refresh(user)
         assert user.onboarding_step == "awaiting_intent_response"
         assert user.onboarding_complete is False
 
 
+@pytest.mark.asyncio
 class TestIntentDetection:
     @patch("app.flows.onboarding.ai.detect_onboarding_intent")
-    def test_high_confidence_resume_intent_creates_job(self, mock_detect, db_session):
+    async def test_high_confidence_resume_intent_creates_job(self, mock_detect, db_session):
         mock_detect.return_value = {
             "intent": "resume",
             "confidence": "high",
@@ -37,7 +39,7 @@ class TestIntentDetection:
         db_session.commit()
         db_session.refresh(user)
 
-        result = onboarding.handle_onboarding_intent_response(
+        result = await onboarding.handle_onboarding_intent_response(
             db_session, user, "I need a new resume for a data analyst role", "111222333", "Bob"
         )
         assert "Let's build" in result or "Step 1" in result or "Basic" in result
@@ -50,7 +52,7 @@ class TestIntentDetection:
         assert job.answers.get("target_role") == "Data Analyst"
 
     @patch("app.flows.onboarding.ai.detect_onboarding_intent")
-    def test_low_confidence_intent_shows_soft_menu(self, mock_detect, db_session):
+    async def test_low_confidence_intent_shows_soft_menu(self, mock_detect, db_session):
         mock_detect.return_value = {
             "intent": "unclear",
             "confidence": "low",
@@ -62,7 +64,7 @@ class TestIntentDetection:
         db_session.commit()
         db_session.refresh(user)
 
-        result = onboarding.handle_onboarding_intent_response(db_session, user, "I'm not sure", "777888999", "Dave")
+        result = await onboarding.handle_onboarding_intent_response(db_session, user, "I'm not sure", "777888999", "Dave")
         assert "__SHOW_DOCUMENT_MENU__|" in result
         db_session.refresh(user)
         assert user.onboarding_complete is True

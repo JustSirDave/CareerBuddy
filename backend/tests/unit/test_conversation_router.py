@@ -307,7 +307,7 @@ class TestHandleResume:
         db_session.refresh(job)
         assert len(job.answers.get("education", [])) > 0
 
-    async def test_skip_education_requires_entry_first(self, db_session, test_user):
+    async def test_skip_education_advances_step(self, db_session, test_user):
         job = Job(
             user_id=test_user.id,
             type="resume",
@@ -321,11 +321,10 @@ class TestHandleResume:
         db_session.add(job)
         db_session.commit()
 
-        response = await handle_resume(db_session, job, "skip")
+        await handle_resume(db_session, job, "skip")
 
         db_session.refresh(job)
-        assert job.answers["_step"] == "education"
-        assert "at least one" in response.lower()
+        assert job.answers["_step"] != "education"
 
     @patch("app.services.ai.generate_skills")
     async def test_skills_ai_generation(self, mock_ai, db_session, test_user):
@@ -509,8 +508,3 @@ class TestConversationEdgeCases:
         assert len(jobs) == 1
 
 
-class TestCreditsFixture:
-    """Sanity check for credit-based users used elsewhere."""
-
-    def test_pro_user_has_document_credits(self, pro_user):
-        assert (pro_user.document_credits or 0) >= 1

@@ -4,7 +4,7 @@ Validates model creation, relationships, and constraints
 """
 import pytest
 from sqlalchemy.exc import IntegrityError
-from app.models import User, Job, Message, Payment
+from app.models import User, Job, Message
 
 
 class TestUserModel:
@@ -22,8 +22,6 @@ class TestUserModel:
         
         assert user.id is not None
         assert user.telegram_user_id == "111222333"
-        assert (user.document_credits or 0) == 0
-        assert user.free_resume_used is False
 
     def test_user_telegram_id_unique(self, db_session, test_user):
         """Test telegram_user_id uniqueness constraint"""
@@ -36,14 +34,6 @@ class TestUserModel:
         with pytest.raises(IntegrityError):
             db_session.commit()
         db_session.rollback()
-
-    def test_user_credit_defaults(self, db_session):
-        user = User(telegram_user_id="999888777")
-        db_session.add(user)
-        db_session.commit()
-
-        assert user.free_resume_used is False
-        assert (user.document_credits or 0) == 0
 
     def test_user_relationships(self, db_session, test_user, test_job):
         """Test user has jobs relationship"""
@@ -185,65 +175,6 @@ class TestMessageModel:
         assert db_session.query(Message).filter(Message.id == msg_id).first() is None
 
 
-class TestPaymentModel:
-    """Test Payment model"""
-
-    def test_create_payment(self, db_session, test_user, test_job):
-        """Test creating a payment"""
-        payment = Payment(
-            user_id=test_user.id,
-            job_id=test_job.id,
-            amount=750,
-            currency="NGN",
-            status="pending",
-            provider="paystack",
-            reference="TEST_REF"
-        )
-        db_session.add(payment)
-        db_session.commit()
-        
-        assert payment.id is not None
-        assert payment.amount == 750
-        assert payment.currency == "NGN"
-        assert payment.status == "pending"
-
-    def test_payment_status_transitions(self, db_session, payment_record):
-        """Test payment status changes"""
-        statuses = ["pending", "success", "failed", "cancelled"]
-        
-        for status in statuses:
-            payment_record.status = status
-            db_session.commit()
-            db_session.refresh(payment_record)
-            assert payment_record.status == status
-
-    def test_payment_relationships(self, db_session, payment_record, test_user, test_job):
-        """Test payment relationships"""
-        assert payment_record.user.id == test_user.id
-        assert payment_record.job.id == test_job.id
-
-    def test_payment_metadata(self, db_session, test_user):
-        """Test payment metadata JSON field"""
-        payment = Payment(
-            user_id=test_user.id,
-            amount=750,
-            currency="NGN",
-            status="success",
-            provider="paystack",
-            reference="TEST_123",
-            payment_metadata={
-                "customer_email": "test@example.com",
-                "plan": "premium",
-                "channel": "card",
-            },
-        )
-        db_session.add(payment)
-        db_session.commit()
-
-        assert payment.payment_metadata["plan"] == "premium"
-        assert payment.payment_metadata["channel"] == "card"
-
-
 class TestModelRelationships:
     """Test relationships between models"""
 
@@ -273,16 +204,6 @@ class TestModelRelationships:
         db_session.refresh(test_job)
         assert len(test_job.messages) == 3
 
-    def test_user_to_payments(self, db_session, test_user):
-        """Test user can have multiple payments"""
-        payment1 = Payment(user_id=test_user.id, amount=750, currency="NGN", status="success", provider="paystack", reference="REF1")
-        payment2 = Payment(user_id=test_user.id, amount=750, currency="NGN", status="pending", provider="paystack", reference="REF2")
-        
-        db_session.add_all([payment1, payment2])
-        db_session.commit()
-        
-        db_session.refresh(test_user)
-        assert len(test_user.payments) >= 2
 
 
 class TestModelValidation:

@@ -9,22 +9,10 @@ from unittest.mock import patch, AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
-from contextlib import contextmanager
-
 from app.config import settings
 from app.db import get_db
 from app.main import app
 from app.models import User, Job
-
-
-@contextmanager
-def _paystack_secret_cleared():
-    old = settings.paystack_secret
-    settings.paystack_secret = ""
-    try:
-        yield
-    finally:
-        settings.paystack_secret = old
 
 
 @pytest.fixture
@@ -128,119 +116,6 @@ class TestTelegramWebhook:
         
         response = client.post("/webhooks/telegram", json=payload)
         
-        assert response.status_code == 200
-
-
-class TestPaystackWebhook:
-    """Test Paystack webhook endpoint"""
-
-    @patch("app.services.payments.verify_payment", new_callable=AsyncMock)
-    def test_successful_payment_webhook(self, mock_verify, client, db_session, test_user):
-        """Test successful payment webhook"""
-        from app.models import Payment
-
-        pending = Payment(
-            user_id=test_user.id,
-            reference="ref_123",
-            amount=75000,
-            currency="NGN",
-            status="pending",
-            provider="paystack",
-            product_type="resume",
-        )
-        db_session.add(pending)
-        db_session.commit()
-
-        mock_verify.return_value = {
-            "status": "success",
-            "amount": 75000,  # 750 NGN in kobo
-            "reference": "ref_123",
-            "customer": {"email": test_user.email},
-        }
-
-        payload = {
-            "event": "charge.success",
-            "data": {
-                "reference": "ref_123",
-                "amount": 75000,
-                "customer": {"email": test_user.email},
-                "status": "success",
-            },
-        }
-
-        with _paystack_secret_cleared():
-            response = client.post("/webhooks/paystack", json=payload)
-
-        assert response.status_code == 200
-
-    @patch("app.config.settings.paystack_secret", "test_secret_for_signature_check")
-    def test_failed_payment_webhook(self, client, db_session, test_user):
-        """Test failed payment webhook"""
-        payload = {
-            "event": "charge.failed",
-            "data": {
-                "reference": "ref_456",
-                "amount": 75000,
-                "customer": {"email": test_user.email},
-                "status": "failed",
-            },
-        }
-
-        response = client.post("/webhooks/paystack", json=payload)
-
-        assert response.status_code == 401
-
-    def test_webhook_invalid_signature(self, client):
-        """Test webhook with invalid signature"""
-        # In production, webhook signature should be verified
-        # This test ensures invalid signatures are rejected
-        payload = {"event": "charge.success"}
-        
-        response = client.post(
-            "/webhooks/paystack",
-            json=payload,
-            headers={"X-Paystack-Signature": "invalid_signature"}
-        )
-        
-        # Should either accept or reject based on signature verification
-        assert response.status_code in [200, 401, 403]
-
-    @patch("app.services.payments.verify_payment", new_callable=AsyncMock)
-    def test_upgrade_payment_webhook(self, mock_verify, client, db_session, test_user):
-        """Test premium upgrade payment webhook"""
-        from app.models import Payment
-
-        ref = f"upgrade_{test_user.telegram_user_id}_123"
-        pending = Payment(
-            user_id=test_user.id,
-            reference=ref,
-            amount=750000,
-            currency="NGN",
-            status="pending",
-            provider="paystack",
-            product_type="bundle",
-        )
-        db_session.add(pending)
-        db_session.commit()
-
-        payload = {
-            "event": "charge.success",
-            "data": {
-                "reference": ref,
-                "amount": 750000,  # 7500 NGN in kobo
-                "customer": {"email": test_user.email},
-                "status": "success",
-                "metadata": {"type": "upgrade"},
-            },
-        }
-
-        mock_verify.return_value = {
-            "status": "success",
-            **payload["data"],
-        }
-        with _paystack_secret_cleared():
-            response = client.post("/webhooks/paystack", json=payload)
-
         assert response.status_code == 200
 
 

@@ -21,7 +21,7 @@ def _sqlite_enable_foreign_keys(dbapi_connection, _connection_record):
         cursor.close()
 
 from app.db import Base
-from app.models import User, Job, Message, Payment
+from app.models import User, Job, Message
 from app.config import settings
 
 # Set test environment
@@ -216,36 +216,16 @@ def mock_telegram_service():
 
 @pytest.fixture
 def pro_user(db_session):
-    """Create test user with paid document credits (no free-tier limits)."""
+    """Second test user (no payment-tier distinction — all users have equal access)."""
     user = User(
         telegram_user_id="987654321",
         telegram_username="pro_user",
         name="Pro User",
-        document_credits=5,
-        cover_letter_credits=2,
     )
     db_session.add(user)
     db_session.commit()
     db_session.refresh(user)
     return user
-
-
-@pytest.fixture
-def payment_record(db_session, test_user, test_job):
-    """Create test payment record"""
-    payment = Payment(
-        user_id=test_user.id,
-        job_id=test_job.id,
-        amount=750,
-        currency="NGN",
-        status="success",
-        provider="paystack",
-        reference="TEST_REF_123"
-    )
-    db_session.add(payment)
-    db_session.commit()
-    db_session.refresh(payment)
-    return payment
 
 
 @pytest.fixture

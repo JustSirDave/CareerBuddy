@@ -1,7 +1,6 @@
 """
 Smoke tests: critical paths with external I/O mocked.
 """
-from contextlib import contextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -10,17 +9,7 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.db import get_db
 from app.main import app
-from app.models import Payment, User
-
-
-@contextmanager
-def _paystack_secret_cleared():
-    old = settings.paystack_secret
-    settings.paystack_secret = ""
-    try:
-        yield
-    finally:
-        settings.paystack_secret = old
+from app.models import User
 
 
 @pytest.fixture
@@ -41,10 +30,8 @@ def override_get_db(db_session):
 @patch("app.services.telegram.send_choice_menu", new_callable=AsyncMock)
 @patch("app.services.telegram.reply_text", new_callable=AsyncMock)
 @patch("app.services.telegram.send_typing_action", new_callable=AsyncMock)
-def test_new_user_receives_free_credits(
-    mock_typing, mock_reply, mock_menu, client, db_session
-):
-    """New /start user has free resume/CV and cover-letter allowances (User flags, not Credit rows)."""
+def test_new_user_created_on_start(mock_typing, mock_reply, mock_menu, client, db_session):
+    """New /start creates a User row and returns 200."""
     tid = "900001001"
     chat_id = 900001001
     payload = {
@@ -60,43 +47,7 @@ def test_new_user_receives_free_credits(
 
     user = db_session.query(User).filter(User.telegram_user_id == tid).first()
     assert user is not None
-    assert user.free_resume_used is False
-    assert user.free_cover_letter_used is False
-
-
-@patch("app.services.telegram.reply_text", new_callable=AsyncMock)
-@patch("app.services.payments.verify_payment", new_callable=AsyncMock)
-def test_paystack_webhook_awards_credit(mock_verify, mock_reply, client, db_session, test_user):
-    """Pending Paystack payment + charge.success updates payment and awards credits."""
-    ref = "smoke_paystack_ref_1"
-    pay = Payment(
-        user_id=test_user.id,
-        reference=ref,
-        amount=750000,
-        currency="NGN",
-        status="pending",
-        provider="paystack",
-        product_type="resume",
-    )
-    db_session.add(pay)
-    db_session.commit()
-
-    mock_verify.return_value = {
-        "status": "success",
-        "reference": ref,
-        "amount": 750000,
-    }
-    payload = {"event": "charge.success", "data": {"reference": ref, "amount": 750000}}
-
-    with _paystack_secret_cleared():
-        with patch("app.services.referral.process_referral_conversion", new_callable=AsyncMock):
-            response = client.post("/webhooks/paystack", json=payload)
-
-    assert response.status_code == 200
-    db_session.refresh(pay)
-    assert pay.status == "success"
-    db_session.refresh(test_user)
-    assert test_user.document_credits >= 1
+    assert user.monthly_doc_count == 0
 
 
 def test_telegram_webhook_rejects_missing_secret_token(client, db_session, monkeypatch):
