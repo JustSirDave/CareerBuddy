@@ -37,7 +37,7 @@ def handle_new_user_welcome(db: Session, user: User, first_name: str) -> str:
     user.onboarding_complete = False
     db.commit()
     db.refresh(user)
-    return ONBOARDING_WELCOME.format(first_name=first_name)
+    return f"__SEND_WELCOME__|{first_name}"
 
 
 async def handle_onboarding_intent_response(

@@ -58,6 +58,40 @@ async def reply_text(chat_id: int | str, text: str, parse_mode: str = "Markdown"
     return {"error": str(last_error)}
 
 
+async def send_welcome_menu(chat_id: int | str, first_name: str) -> dict:
+    """Send the new-user welcome message with document-type inline keyboard."""
+    text = (
+        f"Hey {first_name}! 👋\n\n"
+        "Welcome to CareerBuddy — I help you create professional Resumes, CVs, and Cover Letters "
+        "through a simple conversation. No forms, no uploads, no stress.\n\n"
+        "🎁 Your first Resume/CV and Cover Letter are on us — completely free.\n\n"
+        "What are you working on today?"
+    )
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "📄 Build my Resume / CV", "callback_data": "plan_free"},
+                {"text": "✉️ Write a Cover Letter", "callback_data": "doc_cover"},
+            ],
+            [
+                {"text": "✨ Revamp my existing CV", "callback_data": "doc_revamp"},
+                {"text": "📋 See the menu", "callback_data": "learn_more"},
+            ],
+        ]
+    }
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "reply_markup": keyboard}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload)
+            if r.status_code >= 400:
+                logger.error(f"[telegram] send_welcome_menu failed: {r.status_code} {r.text}")
+            return r.json() if r.content else {}
+    except Exception as e:
+        logger.error(f"[telegram] send_welcome_menu exception: {e}")
+        return {"error": str(e)}
+
+
 async def send_choice_menu(chat_id: int | str):
     """
     Send initial welcome message with inline keyboard for plan selection.

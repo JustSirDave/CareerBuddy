@@ -15,7 +15,7 @@ from app.services.idempotency import seen_or_mark
 from app.db import get_db
 from app.models.user import User
 from app.models.job import Job
-from app.services.telegram import reply_text, send_choice_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request, send_template_selection, send_onboarding_continue_menu, send_format_menu
+from app.services.telegram import reply_text, send_choice_menu, send_welcome_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request, send_template_selection, send_onboarding_continue_menu, send_format_menu
 from app.services.conversation_router import handle_inbound
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -97,6 +97,10 @@ async def _process_telegram_update(payload: dict, db):
 
     if reply == "__SHOW_MENU__":
         await send_choice_menu(chat_id)
+        return
+    if reply and reply.startswith("__SEND_WELCOME__|"):
+        first_name_part = reply.split("|", 1)[1]
+        await send_welcome_menu(chat_id, first_name_part)
         return
     if reply and reply.startswith("__SHOW_ONBOARDING_CONTINUE_MENU__|"):
         parts = reply.split("|", 1)
