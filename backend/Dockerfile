@@ -6,18 +6,22 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install LibreOffice for DOCX→PDF conversion.
-# Dir::Cache::archives redirects package downloads to /tmp which has more
-# headroom than /var/cache/apt/archives/ in constrained build environments.
-RUN mkdir -p /tmp/apt-archives \
-    && apt-get update \
+# Install curl and LibreOffice core deps first (pulls all shared libraries).
+# Split into two RUN commands so each step stays within the apt archive cache
+# size limit on constrained build environments (Railway).
+RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        -o Dir::Cache::archives=/tmp/apt-archives \
         curl \
-        libreoffice-writer \
         libreoffice-core \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/apt-archives
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
+# Install LibreOffice Writer last — shared deps are already present, so
+# this step only fetches the small writer-specific packages.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libreoffice-writer \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 # Copy pyproject.toml and install dependencies
 COPY pyproject.toml ./
