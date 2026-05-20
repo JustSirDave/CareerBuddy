@@ -480,7 +480,6 @@ async def handle_callback_query(callback_query: dict, db):
                 await reply_text(chat_id, reply)
 
         elif data == "onboarding_start_fresh":
-            from app.models import Job, User
             user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
             if user:
                 j = db.query(Job).filter(Job.user_id == user.id, Job.status == "collecting").order_by(Job.created_at.desc()).first()
@@ -530,7 +529,6 @@ Ready to create? Type /start!"""
             logger.info(f"[callback_query] User {chat_id} selected {data}")
 
             # Update job with template choice
-            from app.models import Job
             job = db.query(Job).filter(
                 Job.user_id.in_(
                     db.query(User.id).filter(User.telegram_user_id == str(chat_id))
