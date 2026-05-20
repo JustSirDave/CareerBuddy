@@ -7,15 +7,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install LibreOffice for DOCX→PDF conversion.
-# build-essential is intentionally excluded — all Python deps ship binary wheels.
-RUN apt-get clean \
+# Dir::Cache::archives redirects package downloads to /tmp which has more
+# headroom than /var/cache/apt/archives/ in constrained build environments.
+RUN mkdir -p /tmp/apt-archives \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
+        -o Dir::Cache::archives=/tmp/apt-archives \
         curl \
         libreoffice-writer \
         libreoffice-core \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+    && rm -rf /var/lib/apt/lists/* /tmp/apt-archives
 
 # Copy pyproject.toml and install dependencies
 COPY pyproject.toml ./
