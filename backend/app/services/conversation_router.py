@@ -1056,7 +1056,7 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
             msg = onboarding_flow.ACTIVE_JOB_PROMPT.format(first_name=first_name, doc_type=doc_label)
             return f"__SHOW_ONBOARDING_CONTINUE_MENU__|{msg}"
         msg = onboarding_flow.RETURNING_USER_MENU.format(first_name=first_name)
-        return f"__SHOW_DOCUMENT_MENU__|credits|{msg}"
+        return f"__SHOW_DOCUMENT_MENU__|free|{msg}"
 
     # 1.5) Admin commands
     is_admin_command = any(t_lower.startswith(cmd) for cmd in ADMIN_COMMANDS)
@@ -1082,7 +1082,7 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
             return ("👤 *Grant Credits to User*\n\n"
                     "*Usage:* /setpro <telegram_user_id>\n\n"
                     "*Example:* /setpro 123456789\n\n"
-                    "_Grants 2 doc + 1 CL credits and notifies the user._")
+                    "_Sends a notification message to the user._")
         elif t_lower.startswith("/sample"):
             parts = incoming.split()
             if len(parts) < 2:
@@ -1240,7 +1240,7 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
             db.commit()
             logger.info(f"[handle_inbound] Reset triggered, closed job.id={j.id}")
         if getattr(user, "onboarding_complete", False):
-            return "__SHOW_DOCUMENT_MENU__|credits"
+            return "__SHOW_DOCUMENT_MENU__|free"
         return "__SHOW_MENU__"
 
     # 3) Get/create active job (based on intent if present)

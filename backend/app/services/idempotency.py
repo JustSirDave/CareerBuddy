@@ -6,12 +6,11 @@ Simple Redis-based idempotency checker for webhook deduplication.
 Author: Sir Dave
 """
 import redis.asyncio as aioredis
-import os
 from loguru import logger
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+from app.config import settings
 
-r = aioredis.from_url(REDIS_URL, decode_responses=True)
+r = aioredis.from_url(settings.redis_url, decode_responses=True)
 
 
 async def seen_or_mark(key: str, ttl: int = 3600) -> bool:

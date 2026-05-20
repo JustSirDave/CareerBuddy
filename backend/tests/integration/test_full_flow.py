@@ -311,7 +311,7 @@ class TestErrorRecovery:
         
         # Reset — onboarded users see the document-type menu; non-onboarded see __SHOW_MENU__
         response = await handle_inbound(db_session, telegram_id, "/reset")
-        assert response in ("__SHOW_MENU__", "__SHOW_DOCUMENT_MENU__|credits")
+        assert response in ("__SHOW_MENU__", "__SHOW_DOCUMENT_MENU__|free")
         
         # Start again
         response = await handle_inbound(db_session, telegram_id, "resume")

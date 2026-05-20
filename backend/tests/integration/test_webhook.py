@@ -222,12 +222,6 @@ class TestWebhookSecurity:
         
         assert response.status_code in [405, 404]  # Method not allowed
 
-    def test_paystack_webhook_requires_post(self, client):
-        """Test Paystack webhook only accepts POST"""
-        response = client.get("/webhooks/paystack")
-        
-        assert response.status_code in [405, 404]
-
     def test_webhook_duplicate_message_handling(self, client):
         """Test webhook handles duplicate messages"""
         # Idempotency should prevent duplicate processing

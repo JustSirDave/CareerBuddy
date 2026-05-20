@@ -58,12 +58,12 @@ async def handle_onboarding_intent_response(
         user.onboarding_complete = True
         user.onboarding_step = None
         db.commit()
-        return f"__SHOW_DOCUMENT_MENU__|credits|{BUNDLE_PROMPT}"
+        return f"__SHOW_DOCUMENT_MENU__|free|{BUNDLE_PROMPT}"
 
     user.onboarding_complete = True
     user.onboarding_step = None
     db.commit()
-    return f"__SHOW_DOCUMENT_MENU__|credits|{SOFT_MENU_PROMPT}"
+    return f"__SHOW_DOCUMENT_MENU__|free|{SOFT_MENU_PROMPT}"
 
 
 def _transition_to_flow(

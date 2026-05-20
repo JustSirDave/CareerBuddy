@@ -430,61 +430,6 @@ async def send_format_menu(chat_id: int | str, job_id: str) -> dict:
         return {"error": str(e)}
 
 
-async def send_payment_request(chat_id: int | str, payment_url: str, amount: int) -> dict:
-    """
-    Send payment request with inline keyboard button.
-    
-    Args:
-        chat_id: Telegram chat ID
-        payment_url: Paystack payment URL
-        amount: Amount in Naira
-    
-    Returns:
-        Response JSON from Telegram API
-    """
-    message = f"""💳 *Payment Required*
-
-To continue creating your document, please complete your payment:
-
-*Amount:* ₦{amount:,}
-*What you get:*
-• Professional AI-enhanced document
-• ATS-compliant formatting
-• Instant delivery
-• Priority support
-
-Click the button below to pay securely with Paystack:"""
-
-    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
-    
-    keyboard = {
-        "inline_keyboard": [
-            [
-                {"text": "💳 Pay ₦{:,}".format(amount), "url": payment_url}
-            ],
-            [
-                {"text": "✅ I've Paid", "callback_data": "payment_completed"},
-                {"text": "❌ Cancel", "callback_data": "cancel"}
-            ]
-        ]
-    }
-    
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "Markdown",
-        "reply_markup": keyboard
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            r = await client.post(url, json=payload)
-            if r.status_code >= 400:
-                logger.error(f"Telegram send payment failed: {r.status_code} {r.text}")
-            return r.json() if r.content else {}
-    except Exception as e:
-        logger.error(f"Telegram send payment exception: {e}")
-        return {"error": str(e)}
 
 
 

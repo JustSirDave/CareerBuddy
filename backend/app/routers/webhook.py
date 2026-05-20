@@ -2,8 +2,7 @@
 # Copyright (C) 2026 Xenaptis Technologies
 """
 CareerBuddy - Webhook Router
-Handles Telegram and Paystack webhooks
-Author: Sir Dave
+Handles Telegram webhooks and document delivery.
 """
 import asyncio
 from pathlib import Path
@@ -128,9 +127,6 @@ async def _process_telegram_update(payload: dict, db):
         if len(parts) >= 2:
             user_id = parts[1]
             await send_pdf_to_user(chat_id, user_id, db)
-        return
-    if reply == "__SHOW_TEMPLATE_MENU__":
-        await send_template_selection(chat_id, "credits")
         return
     if reply and reply.startswith("__SHOW_FORMAT_MENU__|"):
         parts = reply.split("|", 1)
@@ -474,7 +470,7 @@ async def handle_callback_query(callback_query: dict, db):
                     tier = parts[1]
                     if len(parts) == 3:
                         await reply_text(chat_id, parts[2])
-                    await send_document_type_menu(chat_id, tier)
+                    await send_document_type_menu(chat_id, "free")
             elif reply:
                 await reply_text(chat_id, reply)
 
@@ -498,7 +494,7 @@ async def handle_callback_query(callback_query: dict, db):
                 if j:
                     j.status = "closed"
                     db.commit()
-            await send_document_type_menu(chat_id, "credits")
+            await send_document_type_menu(chat_id, "free")
 
         elif data == "learn_more":
             # Show more info about the service
@@ -567,17 +563,6 @@ Ready to create? Type /start!"""
                     await reply_text(chat_id, reply)
             else:
                 await reply_text(chat_id, "❌ Session expired. Please type /reset to start over.")
-
-        elif data == "payment_completed":
-            # User claims they've paid - check their payment status
-            await reply_text(chat_id, """✅ *Checking Payment Status...*
-
-Please wait while we verify your payment.
-
-If payment is confirmed, you'll be able to continue creating your document.
-
-_This may take a few moments._""")
-            # The actual payment verification happens via webhook
 
         elif data.startswith("format_docx|") or data.startswith("format_pdf|"):
             fmt = "pdf" if data.startswith("format_pdf|") else "docx"

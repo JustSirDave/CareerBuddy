@@ -65,46 +65,6 @@ def get_user_document_history(db: Session, user_id: str, limit: int = 10) -> Lis
         return []
 
 
-def get_document_by_id(db: Session, job_id: str, user_id: str) -> Dict | None:
-    """
-    Get a specific document by job ID
-    
-    Args:
-        db: Database session
-        job_id: Job ID
-        user_id: User ID (for authorization)
-    
-    Returns:
-        Document metadata or None if not found/unauthorized
-    """
-    try:
-        job = db.query(Job).filter(
-            Job.id == job_id,
-            Job.user_id == user_id
-        ).first()
-        
-        if not job:
-            logger.warning(f"[HISTORY] Document {job_id} not found for user {user_id}")
-            return None
-        
-        answers = job.answers or {}
-        basics = answers.get('basics', {})
-        
-        return {
-            'id': job.id,
-            'type': job.type,
-            'name': basics.get('name', 'Unnamed Document'),
-            'created_at': job.created_at,
-            'status': job.status,
-            'file_path': job.file_path or job.draft_text,
-            'answers': answers
-        }
-    
-    except Exception as e:
-        logger.error(f"[HISTORY] Error fetching document {job_id}: {e}")
-        return None
-
-
 def count_user_documents(db: Session, user_id: str) -> Dict[str, int]:
     """
     Count user's documents by type
