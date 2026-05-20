@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models import User, Job
-from app.services import renderer, storage, ai, payments
+from app.services import renderer, storage, ai
 from app.flows import resume as resume_flow
 from app.services.telegram import reply_text
 
@@ -75,15 +75,6 @@ async def handle_revamp_step(db: Session, job: Job, text: str) -> str:
     # ---- PREVIEW ----
     if step == "preview":
         if t.lower() in {"yes", "y", "confirm", "ok"}:
-            doc_type = "resume"
-            if not payments.can_generate(user, doc_type):
-                return payments.get_purchase_prompt(doc_type)
-            try:
-                credit_type = payments.consume_credit(user, doc_type, db)
-            except ValueError:
-                return payments.get_purchase_prompt(doc_type)
-            answers["_credit_type"] = credit_type
-
             try:
                 logger.info(f"[revamp] Rendering revamped document for job.id={job.id}")
                 loop = asyncio.get_event_loop()

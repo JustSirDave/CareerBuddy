@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import User, Job
 from app.flows import resume as resume_flow
-from app.services import ai, payments
+from app.services import ai
 
 
 ONBOARDING_WELCOME = """Hey {first_name} 👋 Welcome to CareerBuddy!
@@ -49,17 +49,6 @@ async def handle_onboarding_intent_response(
     extracted_role = result.get("extracted_role")
     extracted_company = result.get("extracted_company")
 
-    if intent == "cover_letter" and not payments.can_generate(user, "cover"):
-        user.onboarding_complete = True
-        user.onboarding_step = None
-        db.commit()
-        msg = (
-            "You've used your free cover letter credit.\n\n"
-            "You can purchase more with /buy\\_cover\\_letter, "
-            "or I can help you with a Resume or CV instead."
-        )
-        return f"__SHOW_DOCUMENT_MENU__|credits|{msg}"
-
     if confidence == "high" and intent in ("resume", "cv", "cover_letter"):
         return _transition_to_flow(db, user, intent, extracted_role, extracted_company, first_name)
 
@@ -85,9 +74,6 @@ def _transition_to_flow(
     db.refresh(user)
 
     job_type = "cover" if intent == "cover_letter" else intent
-
-    if not payments.can_generate(user, job_type):
-        return payments.get_purchase_prompt(job_type)
 
     answers = resume_flow.start_context() | {"_step": "basics"}
     if extracted_role:

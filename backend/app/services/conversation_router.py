@@ -14,7 +14,7 @@ from app.flows import resume as resume_flow
 from app.flows import onboarding as onboarding_flow
 from app.flows.validators import validate_basics, validate_experience_bullets
 from app.services.idempotency import seen_or_mark
-from app.services import renderer, storage, ai, payments
+from app.services import renderer, storage, ai
 from app.services.error_handler import handle_error, ErrorType, ERROR_MESSAGES
 
 DROPOUT_HOURS = 6
@@ -35,10 +35,7 @@ RESETS = {"reset", "/reset", "restart"}
 HELP_COMMANDS = {"/help", "help"}
 STATUS_COMMANDS = {"/status", "status"}
 REVISE_COMMANDS = {"/revise", "revise", "request revision"}
-REFERRAL_COMMANDS = {"/referral", "referral"}
 HISTORY_COMMANDS = {"/history", "history", "my documents", "documents"}
-BUY_COMMANDS = {"/buy_resume", "/buy_cv", "/buy_cover_letter", "/buy_bundle"}
-PRICING_COMMANDS = {"/pricing", "pricing"}
 ADMIN_COMMANDS = {"/admin", "/stats", "/broadcast", "/sample", "/makeadmin", "/setpro"}
 PDF_COMMANDS = {"/pdf", "pdf", "convert to pdf", "convert pdf"}
 FORCE_LOWER = lambda s: (s or "").strip().lower()
@@ -105,39 +102,28 @@ def _add_progress(message: str, step: str) -> str:
     return f"📊 *Progress:* {progress}\n\n{message}"
 
 
-HELP_MESSAGE = """🤖 *Career Buddy - Help Guide*
+HELP_MESSAGE = """🤖 *CareerBuddy — Help Guide*
 
-I help you create professional resumes, CVs, and cover letters tailored to your dream role!
+I help you create professional resumes, CVs, and cover letters tailored to your dream role — completely free!
 
 *📝 Available Documents:*
-• *Resume* - 1-2 page professional resume
-• *CV* - Detailed curriculum vitae
-• *Cover Letter* - Tailored application letter
+• *Resume* — 1-2 page professional resume
+• *CV* — Detailed curriculum vitae
+• *Cover Letter* — Tailored application letter
+• *Revamp* — AI-enhanced version of your existing CV
 
 *🎯 How It Works:*
 1. Choose your document type
 2. Answer my questions step by step
 3. I'll enhance your content with AI
-4. Receive your professional document!
+4. Receive your professional document in DOCX or PDF!
 
 *💡 Commands:*
-/start - Start creating a document
-/status - Check your credits
-/buy_resume - Buy a resume credit (₦7,500)
-/buy_cv - Buy a CV credit (₦7,500)
-/buy_cover_letter - Buy a cover letter credit (₦3,000)
-/buy_bundle - 2 docs + 1 cover letter (₦15,000)
-/pricing - View pricing details
-/pdf - Convert document to PDF (paid credits)
-/referral - Share & earn free credits
-/reset - Cancel and start over
-/help - Show this help message
-
-*💳 Pricing:*
-• *1st document free* — then pay per document
-• Resume/CV — ₦7,500
-• Cover Letter — ₦3,000
-• Bundle (2 docs + 1 cover letter) — ₦15,000
+/start — Start creating a document
+/status — View your usage this month
+/pdf — Convert your document to PDF
+/reset — Cancel and start over
+/help — Show this help message
 
 *🆘 Need Support?*
 Contact: @your_support_username
@@ -252,7 +238,7 @@ def _format_preview(answers: dict) -> str:
 
 
 async def convert_to_pdf(db: Session, user: User, telegram_user_id: str) -> str:
-    """Check most recent job's credit_type for PDF permission."""
+    """Send most recent completed document as PDF."""
     last_job = (
         db.query(Job)
         .filter(Job.user_id == user.id, Job.status.in_(["done", "preview_ready", "completed"]))
@@ -261,15 +247,6 @@ async def convert_to_pdf(db: Session, user: User, telegram_user_id: str) -> str:
     )
     if not last_job:
         return "You don't have any documents yet. Create one first with /start!"
-
-    credit_type = (last_job.answers or {}).get("_credit_type", "free")
-    if not payments.can_use_pdf(user, credit_type):
-        return (
-            "🔒 *PDF Format — Paid Credits Only*\n\n"
-            "PDF conversion is available when you use a paid credit.\n\n"
-            "Free documents are delivered as DOCX only.\n\n"
-            "Type /buy_resume or /buy_bundle to purchase credits!"
-        )
     return f"__SEND_PDF__|{telegram_user_id}"
 
 
@@ -691,65 +668,12 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
 
     # ---- FINALIZE ----
     if step == "finalize":
-        doc_type = "cv" if job.type == "cv" else "resume"
-
-        # Gate: check credit availability
-        if not payments.can_generate(user, doc_type):
-            return payments.get_purchase_prompt(doc_type)
-
-        # Consume credit
-        try:
-            credit_type = payments.consume_credit(user, doc_type, db)
-        except ValueError:
-            return payments.get_purchase_prompt(doc_type)
-
-        answers["_credit_type"] = credit_type
-
-        # Paid users pick their delivery format before we render
-        if credit_type == "paid_credit":
-            answers["_step"] = "awaiting_format"
-            job.answers = answers
-            flag_modified(job, "answers")
-            db.commit()
-            return f"__SHOW_FORMAT_MENU__|{job.id}"
-
-        logger.info(f"[handle_resume] Finalizing job.id={job.id} credit_type={credit_type}")
-
-        try:
-            logger.info(f"[handle_resume] Rendering document for job.id={job.id}")
-            loop = asyncio.get_event_loop()
-            if job.type == "cv":
-                doc_bytes = await loop.run_in_executor(None, renderer.render_cv, job)
-            else:
-                doc_bytes = await loop.run_in_executor(None, renderer.render_resume, job)
-
-            filename = _generate_filename(job)
-            file_path = await storage.save_file_locally(job.id, doc_bytes, filename)
-
-            job.draft_text = file_path
-            job.status = "preview_ready"
-            db.commit()
-            logger.info(f"[handle_resume] Document rendered successfully: {file_path}")
-
-        except Exception as e:
-            logger.error(f"[handle_resume] Document rendering failed: {e}")
-            job.status = "render_failed"
-            job.draft_text = f"Error: {str(e)}"
-            db.commit()
-            _advance(db, job, job.answers, "done")
-            telegram_id = user.telegram_user_id
-            if telegram_id:
-                await handle_error(
-                    ErrorType.RENDER_FAILURE,
-                    telegram_id,
-                    "docx_render_failed",
-                    context={"doc_type": job.type or "document"},
-                    exception=e,
-                )
-            return ""
-
-        _advance(db, job, job.answers, "done")
-        return f"__SEND_DOCUMENT__|{job.id}|{filename}"
+        logger.info(f"[handle_resume] Showing format menu for job.id={job.id}")
+        answers["_step"] = "awaiting_format"
+        job.answers = answers
+        flag_modified(job, "answers")
+        db.commit()
+        return f"__SHOW_FORMAT_MENU__|{job.id}"
 
     # ---- AWAITING FORMAT ----
     if step == "awaiting_format":
@@ -872,15 +796,6 @@ async def handle_cover(db: Session, job: Job, text: str) -> str:
     # PREVIEW
     if step == "preview":
         if t.lower() in {"yes", "y", "confirm", "ok"}:
-            doc_type = "cover"
-            if not payments.can_generate(user, doc_type):
-                return payments.get_purchase_prompt(doc_type)
-            try:
-                credit_type = payments.consume_credit(user, doc_type, db)
-            except ValueError:
-                return payments.get_purchase_prompt(doc_type)
-            answers["_credit_type"] = credit_type
-
             try:
                 logger.info(f"[cover] Rendering cover letter for job.id={job.id}")
                 loop = asyncio.get_event_loop()
@@ -924,17 +839,15 @@ async def get_admin_stats(db: Session) -> str:
 
     users = stats['users']
     docs = stats['documents']
-    pay = stats['payments']
     engagement = stats['engagement']
 
-    stats_msg = f"""📊 *Career Buddy - Analytics Dashboard*
+    stats_msg = f"""📊 *CareerBuddy — Analytics Dashboard*
 _Last 7 days overview_
 
 *👥 USER METRICS*
 • Total Users: {users['total']}
 • New Users: {users['new']}
 • Active Users: {users['active']}
-• With Credits: {users.get('paid', 0)}
 
 *📄 DOCUMENT METRICS*
 • Total Generated: {docs['total']}
@@ -946,11 +859,6 @@ _By Type:_
 • 📋 CVs: {docs['cvs']}
 • 📝 Cover Letters: {docs['cover_letters']}
 • ✨ Revamps: {docs['revamps']}
-
-*💰 REVENUE METRICS*
-• Transactions: {pay['total_transactions']}
-• Revenue: ₦{pay['total_revenue']:,.0f}
-• Avg Transaction: ₦{pay['avg_transaction']:,.0f}
 
 *💬 ENGAGEMENT*
 • Total Messages: {engagement['total_messages']}
@@ -991,34 +899,23 @@ async def broadcast_message(db: Session, message: str, sender_id: str) -> str:
 
 
 async def admin_set_user_pro(db: Session, telegram_user_id: str, admin_id: str) -> str:
-    """Admin command to manually grant credits to a user."""
+    """Admin command to send a message to a user."""
     user = db.query(User).filter(User.telegram_user_id == telegram_user_id).first()
     if not user:
         return f"❌ *User Not Found*\n\nNo user found with Telegram ID: `{telegram_user_id}`"
 
-    user.document_credits = (user.document_credits or 0) + 2
-    user.cover_letter_credits = (user.cover_letter_credits or 0) + 1
-    payments.record_waived_payment(db, user.id, "admin_grant", reference=f"admin-{admin_id}-{telegram_user_id}")
-    db.commit()
-    logger.info(f"[admin] Credits granted to user {user.id} by admin {admin_id}")
-
+    logger.info(f"[admin] Admin {admin_id} contacted user {user.id}")
     from app.services import telegram
     try:
         await telegram.reply_text(
             telegram_user_id,
-            "🎉 *Credits Added!*\n\n"
-            "You've been granted:\n"
-            "• 📄 2 document credits\n"
-            "• ✉️ 1 cover letter credit\n\n"
-            f"Your balance:\n{payments.get_credit_summary(user)}\n\n"
-            "Type /status to see your credits!",
+            "👋 *Message from CareerBuddy*\n\n"
+            "You've been flagged by an admin. Type /start to create your documents!",
         )
     except Exception as e:
         logger.error(f"[admin] Failed to notify user {telegram_user_id}: {e}")
 
-    return (f"✅ *Credits Granted*\n\n"
-            f"@{user.telegram_username or telegram_user_id} received 2 doc + 1 CL credits.\n"
-            f"Current: {payments.get_credit_summary(user)}")
+    return f"✅ *User Notified*\n\n@{user.telegram_username or telegram_user_id} has been messaged."
 
 
 async def generate_sample_document(db: Session, user_id: int, template_choice: str = "template_1", doc_type: str = "resume") -> tuple[str, str]:
@@ -1104,20 +1001,10 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         if t_lower in HELP_COMMANDS:
             return HELP_MESSAGE + "\n\n_What brings you here today? Tell me what you're looking for._"
         if t_lower in STATUS_COMMANDS:
-            summary = payments.get_credit_summary(user)
-            return f"📊 *Your credits:*\n{summary}\n\n_What brings you here today? Tell me what you're looking for._"
+            return "📊 *Your account is active!*\n\n_What brings you here today? Tell me what you're looking for._"
         reply = await onboarding_flow.handle_onboarding_intent_response(db, user, incoming, telegram_user_id, first_name)
         if reply:
             return reply
-
-    # 1.44) /start with referral code
-    if incoming.startswith("/start ") and len(incoming.split()) > 1:
-        parts = incoming.split()
-        if len(parts) > 1 and parts[1].startswith("ref_"):
-            ref_code = parts[1].replace("ref_", "").strip()
-            if ref_code and not getattr(user, "referred_by_code", None):
-                from app.services import referral as referral_svc
-                referral_svc.handle_referral_signup(user, ref_code, db)
 
     # 1.45) /start and greetings
     is_start = t_lower in GREETINGS or t_lower.startswith("/start")
@@ -1205,48 +1092,17 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
     # 1.7) Status command
     if t_lower in STATUS_COMMANDS:
         logger.info(f"[handle_inbound] Processing /status for user {telegram_user_id}")
-        summary = payments.get_credit_summary(user)
         display_name = _esc(user.name or user.telegram_username or "User")
+        doc_count = getattr(user, "monthly_doc_count", 0) or 0
+        from app.config import settings as app_settings
+        limit = app_settings.monthly_doc_limit
         status_msg = (
-            "📊 Your Account Status\n\n"
+            "📊 *Your Account*\n\n"
             f"👤 {display_name}\n\n"
-            f"💳 Credits:\n"
-            f"{summary}\n\n"
-            "Type /pricing to see pricing\n"
-            "Type /referral to earn free credits\n\n"
+            f"📄 Documents this month: {doc_count} / {limit}\n\n"
             "Ready to create? Type /start!"
         )
         return status_msg
-
-    # 1.7.2) Pricing command
-    if t_lower in PRICING_COMMANDS:
-        logger.info(f"[handle_inbound] Processing /pricing for user {telegram_user_id}")
-        summary = payments.get_credit_summary(user)
-        pricing_msg = (
-            "💰 CareerBuddy Pricing\n\n"
-            "Your first resume/CV and first cover letter are free!\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📄 Resume / CV — {payments.PRICE_DISPLAY['resume']} per credit\n\n"
-            f"✉️ Cover Letter — {payments.PRICE_DISPLAY['cover_letter']} per credit\n\n"
-            f"🎁 Bundle (best value) — {payments.PRICE_DISPLAY['bundle']}\n"
-            "   2 document credits + 1 cover letter credit\n"
-            "   Save ₦3,000!\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "📝 How credits work:\n"
-            "• Free credit → DOCX only\n"
-            "• Paid credit → DOCX + PDF\n"
-            "• Bundle credits work for any resume or CV\n\n"
-            "🎁 Earn free credits:\n"
-            "Type /referral to get your referral link\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"💳 Your balance:\n{summary}\n\n"
-            "Purchase commands:\n"
-            "/buy_resume — 1 resume/CV credit\n"
-            "/buy_cv — 1 resume/CV credit\n"
-            "/buy_cover_letter — 1 cover letter credit\n"
-            "/buy_bundle — 2 doc + 1 CL credits"
-        )
-        return pricing_msg
 
     # 1.7.4) Render retry
     if t_lower in {"retry", "try again", "retry again"}:
@@ -1300,37 +1156,6 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         history_msg += "Ready to create more? Type /start!"
         return history_msg
 
-    # 1.8) Buy commands
-    if t_lower in BUY_COMMANDS:
-        product_map = {
-            "/buy_resume": "resume",
-            "/buy_cv": "cv",
-            "/buy_cover_letter": "cover_letter",
-            "/buy_bundle": "bundle",
-        }
-        product_type = product_map.get(t_lower)
-        if not product_type:
-            return "Invalid command. Try /buy_resume, /buy_cv, /buy_cover_letter, or /buy_bundle."
-        logger.info(f"[handle_inbound] Buy command: {product_type} for user {telegram_user_id}")
-        result = await payments.initiate_payment(user, product_type, db)
-        if "error" in result:
-            return ("❌ Sorry, we couldn't create your payment link. Please try again later.\n\n"
-                    "Support: 07063011079")
-        price = payments.PRICE_DISPLAY.get(product_type, "")
-        awards = payments.CREDIT_AWARDS.get(product_type, {})
-        award_lines = []
-        if awards.get("document_credits"):
-            award_lines.append(f"📄 {awards['document_credits']} document credit{'s' if awards['document_credits'] > 1 else ''}")
-        if awards.get("cover_letter_credits"):
-            award_lines.append(f"✉️ {awards['cover_letter_credits']} cover letter credit{'s' if awards['cover_letter_credits'] > 1 else ''}")
-        award_text = "\n".join(award_lines)
-        return (f"💳 *Payment Link Created*\n\n"
-                f"Product: *{product_type.replace('_', ' ').title()}*\n"
-                f"Price: *{price}*\n\n"
-                f"You'll receive:\n{award_text}\n\n"
-                f"Click here to pay:\n{result['payment_url']}\n\n"
-                f"_Credits will be added automatically after payment._")
-
     # 1.9) PDF conversion command
     if t_lower in PDF_COMMANDS or ("convert" in t_lower and "pdf" in t_lower):
         logger.info(f"[handle_inbound] Processing /pdf for user {telegram_user_id}")
@@ -1352,22 +1177,6 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         db.commit()
         return start_revision(db, latest_done, telegram_user_id)
 
-    # 1.9.7) /referral command
-    if t_lower in REFERRAL_COMMANDS:
-        from app.services import referral as referral_svc
-        from app.config import settings as app_settings
-        code = referral_svc.get_or_create_referral_code(user, db)
-        bot_username = app_settings.telegram_bot_username
-        link = f"https://t.me/{bot_username}?start=ref_{code}"
-        credits = getattr(user, "referral_credits", 0) or 0
-        return (
-            f"Share your link and earn a *free document credit* every time "
-            f"someone you refer makes their first purchase!\n\n"
-            f"Your link:\n{link}\n\n"
-            f"*Your credits:* {credits}\n\n"
-            f"Credits apply automatically on your next document — no code needed."
-        )
-
     # 2) Reset/menu
     if t_lower in RESETS:
         j = _active_collecting_job(db, user.id)
@@ -1383,11 +1192,6 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
     active_job = _active_collecting_job(db, user.id)
     doc_type = infer_type(incoming) if not active_job else None
     logger.info(f"[handle_inbound] doc_type={doc_type}, active_job={'Yes' if active_job else 'No'}, user.id={user.id}")
-
-    # Gate: check credit at flow entry for new jobs
-    if doc_type and not active_job:
-        if not payments.can_generate(user, doc_type):
-            return payments.get_purchase_prompt(doc_type)
 
     if doc_type == "revamp":
         from app.flows import revamp as revamp_flow
