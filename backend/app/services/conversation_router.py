@@ -668,6 +668,10 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
 
     # ---- FINALIZE ----
     if step == "finalize":
+        from app.services.usage import check_and_increment
+        limit_msg = check_and_increment(user, db)
+        if limit_msg:
+            return limit_msg
         logger.info(f"[handle_resume] Showing format menu for job.id={job.id}")
         answers["_step"] = "awaiting_format"
         job.answers = answers
@@ -796,6 +800,10 @@ async def handle_cover(db: Session, job: Job, text: str) -> str:
     # PREVIEW
     if step == "preview":
         if t.lower() in {"yes", "y", "confirm", "ok"}:
+            from app.services.usage import check_and_increment
+            limit_msg = check_and_increment(user, db)
+            if limit_msg:
+                return limit_msg
             try:
                 logger.info(f"[cover] Rendering cover letter for job.id={job.id}")
                 loop = asyncio.get_event_loop()
