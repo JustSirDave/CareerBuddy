@@ -1018,7 +1018,10 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         )
         if feedback_job:
             from app.services.telegram import forward_bad_feedback
+            from app.models.feedback import Feedback
             await forward_bad_feedback(incoming, telegram_username, from_chat_id=telegram_user_id)
+            fb = Feedback(user_id=user.id, job_id=feedback_job.id, rating="bad", feedback_text=incoming)
+            db.add(fb)
             feedback_job.answers["_awaiting_feedback"] = False
             flag_modified(feedback_job, "answers")
             db.commit()

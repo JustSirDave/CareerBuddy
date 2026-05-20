@@ -630,6 +630,22 @@ _This may take a few moments._""")
                 await reply_text(chat_id, f"❌ Document generation failed. Please try /reset and try again.")
 
         elif data == "feedback_good":
+            user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
+            if user:
+                recent_done = (
+                    db.query(Job)
+                    .filter(Job.user_id == user.id, Job.status == "done")
+                    .order_by(Job.created_at.desc())
+                    .first()
+                )
+                from app.models.feedback import Feedback
+                fb = Feedback(
+                    user_id=user.id,
+                    job_id=recent_done.id if recent_done else None,
+                    rating="good",
+                )
+                db.add(fb)
+                db.commit()
             await reply_text(chat_id, "🎉 Glad to hear it! Good luck with your job search. Type /start whenever you need another document.")
 
         elif data == "feedback_bad":

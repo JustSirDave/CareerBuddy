@@ -35,6 +35,7 @@ class User(Base):
     # Relationships
     jobs = relationship("Job", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
+    feedback = relationship("Feedback", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, telegram_user_id={self.telegram_user_id}, name={self.name})>"

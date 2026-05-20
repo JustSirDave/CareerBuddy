@@ -36,6 +36,7 @@ class Job(Base):
     # Relationships
     user = relationship("User", back_populates="jobs")
     messages = relationship("Message", back_populates="job", cascade="all, delete-orphan")
+    feedback = relationship("Feedback", back_populates="job", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Job(id={self.id}, type={self.type}, status={self.status})>"
