@@ -3,7 +3,6 @@ Tests for webhook API endpoints
 Tests Telegram and Paystack webhook handling
 """
 import uuid
-from pathlib import Path
 from unittest.mock import patch, AsyncMock
 
 import pytest
@@ -153,32 +152,22 @@ class TestFileDownload:
         assert response.status_code == 404
 
     def test_download_existing_file(self, client, db_session, test_user):
-        """Job exists and file on disk under output/jobs/{job_id}/."""
+        """Job with a Cloudinary URL in draft_text → 302 redirect."""
+        cloudinary_url = "https://res.cloudinary.com/test/raw/upload/v1/careerbuddy/jobs/test/resume.docx"
         job = Job(
             user_id=test_user.id,
             type="resume",
             status="delivered",
             answers={},
+            draft_text=cloudinary_url,
         )
         db_session.add(job)
         db_session.commit()
         db_session.refresh(job)
 
-        filename = "resume.docx"
-        out_dir = Path("output") / "jobs" / str(job.id)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        file_path = out_dir / filename
-        file_path.write_bytes(b"PK\x03\x04 fake docx")
-
-        try:
-            response = client.get(f"/download/{job.id}/{filename}")
-            assert response.status_code == 200
-        finally:
-            file_path.unlink(missing_ok=True)
-            out_dir.rmdir()
-            parent = out_dir.parent
-            if parent.is_dir() and not any(parent.iterdir()):
-                parent.rmdir()
+        response = client.get(f"/download/{job.id}/resume.docx", follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers["location"] == cloudinary_url
 
 
 class TestRateLimiting:

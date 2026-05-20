@@ -87,8 +87,7 @@ async def handle_revamp_step(db: Session, job: Job, text: str) -> str:
                 doc_bytes = await loop.run_in_executor(None, renderer.render_revamp, job)
                 from app.utils import generate_filename
                 filename = generate_filename(job)
-                file_path = await storage.save_file_locally(job.id, doc_bytes, filename)
-                job.draft_text = file_path
+                job.draft_text = await storage.save_document(job.id, doc_bytes, filename)
                 job.status = "preview_ready"
                 answers["_step"] = "done"
                 job.answers = answers

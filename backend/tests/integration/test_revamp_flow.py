@@ -3,7 +3,7 @@ Tests for revamp service
 Tests AI-powered resume improvement feature
 """
 import pytest
-from unittest.mock import patch, Mock
+from unittest.mock import AsyncMock, patch, Mock
 from app.services.conversation_router import handle_revamp, handle_inbound
 from app.services import renderer, ai
 from app.models import User, Job
@@ -138,11 +138,11 @@ class TestRevampFlow:
 
     @patch('app.services.ai.revamp_resume')
     @patch('app.services.renderer.render_revamp')
-    @patch('app.services.storage.save_file_locally')
+    @patch('app.services.storage.save_document', new_callable=AsyncMock)
     async def test_revamp_confirm_generation(self, mock_storage, mock_render, mock_revamp, db_session, test_user):
         """Test confirming revamp and generating document"""
         mock_render.return_value = b"DOCX_CONTENT"
-        mock_storage.return_value = "/path/to/file.docx"
+        mock_storage.return_value = "https://res.cloudinary.com/test/raw/upload/v1/careerbuddy/jobs/test/resume.docx"
         
         job = Job(
             user_id=test_user.id,

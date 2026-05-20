@@ -255,35 +255,32 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
     """
     Send the generated document to the user via Telegram.
 
-    Args:
-        chat_id: Telegram chat ID
-        job_id: Job ID
-        filename: Document filename
+    Fetches bytes from the Cloudinary URL stored in job.draft_text,
+    then sends via Telegram. Falls back to a direct Cloudinary link.
     """
     try:
-        # Find the file on disk
-        file_path = Path(settings.output_dir) / job_id / filename
+        job = db.query(Job).filter(Job.id == job_id).first() if db else None
+        doc_url = (
+            job.draft_text
+            if job and job.draft_text and job.draft_text.startswith("http")
+            else None
+        )
 
-        if not file_path.exists():
-            logger.error(f"[telegram_webhook] Document file not found: {file_path}")
+        if not doc_url:
+            logger.error(f"[telegram_webhook] No Cloudinary URL for job {job_id}")
             await reply_text(chat_id, "❌ Sorry, your document could not be found. Please try again.")
             return
 
-        # Send document as .docx for review
-        loop = asyncio.get_event_loop()
-        file_bytes = await loop.run_in_executor(None, file_path.read_bytes)
+        file_bytes = await storage.fetch_document_bytes(doc_url)
         send_resp = await send_document(chat_id, file_bytes, filename, caption="📄 *Your Document is Ready!*")
 
         if send_resp and not send_resp.get("error"):
             logger.info(f"[telegram_webhook] Document sent to {chat_id}: {filename}")
-            # Mark job as delivered for delivery confirmation (24hr follow-up)
-            if db:
+            if db and job:
                 from datetime import datetime
-                job = db.query(Job).filter(Job.id == job_id).first()
-                if job:
-                    job.status = "done"
-                    job.completed_at = datetime.utcnow()
-                    db.commit()
+                job.status = "done"
+                job.completed_at = datetime.utcnow()
+                db.commit()
             success_msg = (
                 "✅ *Your document is ready!*\n\n"
                 "📝 Open in Microsoft Word or Google Docs to review and edit.\n\n"
@@ -295,25 +292,16 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
             await send_feedback_prompt(chat_id)
             return
 
-        # Fallback to download link
-        from app.utils import generate_download_token
-        file_size_kb = file_path.stat().st_size // 1024
-        token = generate_download_token(job_id, settings.download_secret)
-        download_url = f"{settings.public_url}/download/{job_id}/{filename}?token={token}"
+        # Fallback: send Cloudinary URL directly
         doc_type = filename.split("_")[0].capitalize()
-
-        message = f"""✅ Your {doc_type} is ready!
-
-📄 *{filename}*
-📦 Size: {file_size_kb}KB
-
-Download here:
-{download_url}
-
-Reply /reset to create another document."""
-
+        message = (
+            f"✅ Your {doc_type} is ready!\n\n"
+            f"📄 *{filename}*\n\n"
+            f"Download here:\n{doc_url}\n\n"
+            f"Reply /reset to create another document."
+        )
         await reply_text(chat_id, message)
-        logger.info(f"[telegram_webhook] Fallback download link sent to {chat_id}: {download_url}")
+        logger.info(f"[telegram_webhook] Fallback Cloudinary link sent to {chat_id}")
 
     except Exception as e:
         logger.error(f"[telegram_webhook] Error sending document: {e}")
@@ -389,14 +377,19 @@ async def send_pdf_to_user(chat_id: int | str, user_id: str, db: Session):
                 logger.info(f"[send_pdf] Successfully generated PDF using ReportLab for {template}")
             except Exception as e:
                 logger.error(f"[send_pdf] Direct PDF generation failed: {e}")
-                # Fallback to LibreOffice conversion as last resort
-                job_output_dir = Path(settings.output_dir) / latest_job.id
-                if job_output_dir.exists():
-                    docx_files = list(job_output_dir.glob("*.docx"))
-                    if docx_files:
-                        latest_docx_path = max(docx_files, key=lambda p: p.stat().st_mtime)
-                        logger.info(f"[send_pdf] Falling back to LibreOffice for {template}")
-                        pdf_bytes, pdf_filename = await storage.convert_docx_to_pdf(latest_docx_path)
+                # Fallback: fetch DOCX from Cloudinary and convert with LibreOffice
+                if latest_job.draft_text and latest_job.draft_text.startswith("http"):
+                    try:
+                        import tempfile as _tempfile
+                        docx_bytes = await storage.fetch_document_bytes(latest_job.draft_text)
+                        with _tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as _tmp:
+                            _tmp.write(docx_bytes)
+                            _tmp_path = Path(_tmp.name)
+                        logger.info(f"[send_pdf] Falling back to LibreOffice conversion")
+                        pdf_bytes, pdf_filename = await storage.convert_docx_to_pdf(_tmp_path)
+                        _tmp_path.unlink(missing_ok=True)
+                    except Exception as _fe:
+                        logger.error(f"[send_pdf] LibreOffice fallback failed: {_fe}")
 
         if not pdf_bytes:
             await reply_text(chat_id, "❌ Sorry, I couldn't convert your document to PDF. This feature requires LibreOffice to be installed on the server. Please try converting it manually or contact support.")
@@ -603,8 +596,7 @@ Ready to create? Type /start!"""
                     else:
                         doc_bytes = await cb_loop.run_in_executor(None, renderer.render_resume, job)
                     filename = generate_filename(job)
-                    file_path = await storage.save_file_locally(job.id, doc_bytes, filename)
-                    job.draft_text = file_path
+                    job.draft_text = await storage.save_document(job.id, doc_bytes, filename)
                     job.status = "preview_ready"
                     answers["_step"] = "done"
                     job.answers = answers

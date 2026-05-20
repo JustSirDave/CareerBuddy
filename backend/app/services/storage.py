@@ -1,50 +1,35 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Xenaptis Technologies
 """
-CareerBuddy - File Storage Service
-Handles local document storage and DOCX to PDF conversion
-Author: Sir Dave
+CareerBuddy - Storage Service
+Cloud document upload via Cloudinary and DOCX-to-PDF conversion via LibreOffice.
 """
 import asyncio
-import os
 import tempfile
 from pathlib import Path
+
 from loguru import logger
 
 
-async def save_file_locally(job_id: str, file_bytes: bytes, filename: str) -> str:
-    """
-    Save file to local filesystem.
+async def save_document(job_id: str, file_bytes: bytes, filename: str) -> str:
+    """Upload document to Cloudinary. Returns the secure URL."""
+    from app.services.cloud_storage import upload_document
+    return await upload_document(file_bytes, filename, job_id)
 
-    Args:
-        job_id: Job ID
-        file_bytes: File content
-        filename: Filename
 
-    Returns:
-        Local file path
-    """
-    from app.config import settings
-    output_dir = Path(settings.output_dir) / job_id
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    file_path = output_dir / filename
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, file_path.write_bytes, file_bytes)
-
-    logger.info(f"[storage] Saved file locally to {file_path}")
-    return str(file_path)
+async def fetch_document_bytes(url: str) -> bytes:
+    """Fetch raw bytes from a URL (used to retrieve Cloudinary documents)."""
+    import httpx
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        return r.content
 
 
 async def convert_docx_to_pdf(docx_path) -> tuple[bytes | None, str]:
-    """
-    Convert a DOCX file to PDF using LibreOffice.
+    """Convert a DOCX file to PDF using LibreOffice.
 
-    Args:
-        docx_path: Path to the .docx file (string or Path object)
-
-    Returns:
-        Tuple of (PDF bytes, PDF filename) or (None, "") if conversion fails
+    Returns (pdf_bytes, pdf_filename) or (None, "") on failure.
     """
     try:
         docx_path = Path(docx_path)
@@ -54,7 +39,6 @@ async def convert_docx_to_pdf(docx_path) -> tuple[bytes | None, str]:
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir_path = Path(temp_dir)
-
             cmd = [
                 "libreoffice",
                 "--headless",
@@ -62,9 +46,8 @@ async def convert_docx_to_pdf(docx_path) -> tuple[bytes | None, str]:
                 "pdf:writer_pdf_Export",
                 "--outdir",
                 str(temp_dir_path),
-                str(docx_path)
+                str(docx_path),
             ]
-
             logger.info(f"[convert_docx_to_pdf] Running: {' '.join(cmd)}")
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -85,14 +68,13 @@ async def convert_docx_to_pdf(docx_path) -> tuple[bytes | None, str]:
 
             pdf_filename = docx_path.stem + ".pdf"
             pdf_path = temp_dir_path / pdf_filename
-
             if not pdf_path.exists():
                 logger.error(f"[convert_docx_to_pdf] PDF not generated: {pdf_path}")
                 return None, ""
 
             loop = asyncio.get_event_loop()
             pdf_bytes = await loop.run_in_executor(None, pdf_path.read_bytes)
-            logger.info(f"[convert_docx_to_pdf] Successfully converted to PDF ({len(pdf_bytes)} bytes)")
+            logger.info(f"[convert_docx_to_pdf] Converted ({len(pdf_bytes)} bytes)")
             return pdf_bytes, pdf_filename
 
     except Exception as e:

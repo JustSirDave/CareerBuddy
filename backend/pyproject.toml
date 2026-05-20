@@ -29,6 +29,9 @@ pypdf = "^3.17.0"
 # AI/LLM Integration
 openai = "^1.0.0"
 
+# Cloud Storage
+cloudinary = "^1.36.0"
+
 # Scheduler
 apscheduler = "^3.10.0"
 

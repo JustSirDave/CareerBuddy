@@ -40,8 +40,10 @@ class Settings(BaseModel):
     # AI/LLM
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
 
-    # Storage
-    output_dir: str = os.getenv("OUTPUT_DIR", "output/jobs")
+    # Cloudinary cloud storage
+    cloudinary_cloud_name: str = os.getenv("CLOUDINARY_CLOUD_NAME", "")
+    cloudinary_api_key: str = os.getenv("CLOUDINARY_API_KEY", "")
+    cloudinary_api_secret: str = os.getenv("CLOUDINARY_API_SECRET", "")
 
     # Monthly document limit
     monthly_doc_limit: int = int(os.getenv("MONTHLY_DOC_LIMIT", "5"))

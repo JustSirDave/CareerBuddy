@@ -8,11 +8,9 @@ import json
 import logging
 import uuid
 import time
-from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from loguru import logger
 from sqlalchemy import text
@@ -142,11 +140,12 @@ async def health():
 
 @app.get("/download/{job_id}/{filename}")
 async def download_file(job_id: str, filename: str, token: str = "", db=Depends(get_db)):
-    """Serve generated documents. Requires a valid signed token."""
+    """Redirect to Cloudinary document URL after token validation."""
     from app.models import Job
     from app.utils import verify_download_token
-
+    from fastapi.responses import RedirectResponse
     import re
+
     if not re.match(r'^[a-f0-9\-]{36}$', job_id):
         raise HTTPException(status_code=400, detail="Invalid job ID format")
 
@@ -154,22 +153,11 @@ async def download_file(job_id: str, filename: str, token: str = "", db=Depends(
         raise HTTPException(status_code=403, detail="Invalid or expired download token")
 
     job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
+    if not job or not job.draft_text or not job.draft_text.startswith("http"):
         raise HTTPException(status_code=404, detail="File not found")
 
-    safe_filename = Path(filename).name
-    file_path = Path(settings.output_dir) / job_id / safe_filename
-
-    if not file_path.exists():
-        logger.error(f"[download] File not found: {file_path}")
-        raise HTTPException(status_code=404, detail="File not found")
-
-    logger.info(f"[download] Serving file: {file_path}")
-    return FileResponse(
-        path=str(file_path),
-        filename=safe_filename,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
+    logger.info(f"[download] Redirecting job {job_id} to Cloudinary")
+    return RedirectResponse(url=job.draft_text, status_code=302)
 
 
 app.add_middleware(RequestLogMiddleware)

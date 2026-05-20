@@ -214,7 +214,7 @@ class TestRenderFailure:
 
         with patch("app.services.conversation_router.renderer.render_resume") as mock_render:
             mock_render.return_value = b"docx_bytes"
-            with patch("app.services.conversation_router.storage.save_file_locally", return_value="/tmp/test.docx"):
+            with patch("app.services.conversation_router.storage.save_document", new_callable=AsyncMock, return_value="https://res.cloudinary.com/test/raw/upload/test.docx"):
                 reply = await handle_inbound(
                     db_session,
                     str(pro_user.telegram_user_id),

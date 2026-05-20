@@ -811,8 +811,7 @@ async def handle_cover(db: Session, job: Job, text: str) -> str:
                 loop = asyncio.get_event_loop()
                 doc_bytes = await loop.run_in_executor(None, renderer.render_cover_letter, job)
                 filename = _generate_filename(job)
-                file_path = await storage.save_file_locally(job.id, doc_bytes, filename)
-                job.draft_text = file_path
+                job.draft_text = await storage.save_document(job.id, doc_bytes, filename)
                 job.status = "preview_ready"
                 db.commit()
                 _advance(db, job, answers, "done")
@@ -963,9 +962,8 @@ async def generate_sample_document(db: Session, user_id: int, template_choice: s
         else:
             doc_bytes = await loop.run_in_executor(None, renderer.render_resume, job)
         filename = _generate_filename(job)
-        file_path = await storage.save_file_locally(job.id, doc_bytes, filename)
+        job.draft_text = await storage.save_document(job.id, doc_bytes, filename)
         job.status = "completed"
-        job.draft_text = file_path
         db.commit()
         logger.info(f"[generate_sample] Generated sample document: {filename}")
         return (job.id, filename)

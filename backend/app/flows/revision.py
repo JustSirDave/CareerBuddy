@@ -275,8 +275,7 @@ def _handle_revision_confirmation(db: Session, job: Job, message_text: str, tele
             doc_bytes = renderer.render_resume(job)
 
         filename = _generate_filename(job)
-        file_path = storage.save_file_locally(job.id, doc_bytes, filename)
-        job.draft_text = file_path
+        job.draft_text = await storage.save_document(job.id, doc_bytes, filename)
         db.commit()
 
         return f"__SEND_DOCUMENT__|{job.id}|{filename}"

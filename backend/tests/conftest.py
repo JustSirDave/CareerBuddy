@@ -6,7 +6,7 @@ import os
 import sqlite3
 
 import pytest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import AsyncMock, Mock, MagicMock, patch
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
@@ -242,6 +242,9 @@ def mock_pdf_renderer():
 def mock_storage():
     """Mock storage service"""
     mock = Mock()
-    mock.save_file_locally.return_value = "/path/to/file.docx"
-    mock.convert_docx_to_pdf.return_value = "/path/to/file.pdf"
+    mock.save_document = AsyncMock(
+        return_value="https://res.cloudinary.com/test/raw/upload/v1/careerbuddy/jobs/test-job-id/resume.docx"
+    )
+    mock.fetch_document_bytes = AsyncMock(return_value=b"DOCX_CONTENT")
+    mock.convert_docx_to_pdf = AsyncMock(return_value=(b"PDF_CONTENT", "file.pdf"))
     return mock
