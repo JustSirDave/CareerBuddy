@@ -1,7 +1,7 @@
 """add feedback table
 
 Revision ID: 0003_add_feedback_table
-Revises: 0002_remove_payments_add_monthly_limit
+Revises: 0002_rm_payments
 Create Date: 2026-05-20
 
 - Add feedback table to store user ratings and bad-feedback text
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = '0003_add_feedback_table'
-down_revision: Union[str, None] = '0002_remove_payments_add_monthly_limit'
+down_revision: Union[str, None] = '0002_rm_payments'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
