@@ -1,33 +1,28 @@
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
-# Install build-essential and curl first (smaller download), then clean cache
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+# Install LibreOffice for DOCX→PDF conversion.
+# build-essential is intentionally excluded — all Python deps ship binary wheels.
+RUN apt-get clean \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        libreoffice-writer \
+        libreoffice-core \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
-# Copy pyproject.toml and install dependencies (needs build-essential for C extensions)
+# Copy pyproject.toml and install dependencies
 COPY pyproject.toml ./
 RUN pip install --upgrade pip && \
     pip install poetry && \
     poetry config virtualenvs.create false && \
     poetry install --only main --no-interaction --no-ansi --no-root
-
-# Remove build-essential after Python deps are compiled to free disk space
-RUN apt-get purge -y --auto-remove build-essential && rm -rf /var/lib/apt/lists/*
-
-# Install LibreOffice for PDF conversion (large package, needs its own layer)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libreoffice-writer \
-    libreoffice-core \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
 
 # With build context = ./backend, the app folder is right here
 COPY app ./app
