@@ -44,8 +44,11 @@ class Settings(BaseModel):
     # Storage
     output_dir: str = os.getenv("OUTPUT_DIR", "output/jobs")
 
-    # Payments
-    paystack_secret: str = os.getenv("PAYSTACK_SECRET", "")
+    # Monthly document limit
+    monthly_doc_limit: int = int(os.getenv("MONTHLY_DOC_LIMIT", "5"))
+
+    # Feedback
+    feedback_channel_id: str = os.getenv("FEEDBACK_CHANNEL_ID", "")
 
     # Security
     download_secret: str = os.getenv("DOWNLOAD_SECRET", "")

@@ -1,8 +1,9 @@
 """
-CareerBuddy - User Model
-Author: Sir Dave
+CareerBuddy — AI Career Document Assistant
+Copyright (C) 2026 Xenaptis Technologies
+Licensed under AGPL-3.0: https://www.gnu.org/licenses/agpl-3.0.html
 """
-from sqlalchemy import Column, String, DateTime, Boolean, Integer
+from sqlalchemy import Column, String, DateTime, Boolean, Integer, Date
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db import Base
@@ -21,18 +22,12 @@ class User(Base):
     phone = Column(String(50))
     locale = Column(String(10), default="en")
 
-    # Credit-based access (replaces old tier/quota system)
-    free_resume_used = Column(Boolean, default=False, nullable=False)
-    free_cover_letter_used = Column(Boolean, default=False, nullable=False)
-    document_credits = Column(Integer, default=0, nullable=False)
-    cover_letter_credits = Column(Integer, default=0, nullable=False)
+    # Monthly usage limit
+    monthly_doc_count = Column(Integer, default=0, nullable=False, server_default="0")
+    monthly_reset_date = Column(Date, nullable=True)
 
     onboarding_complete = Column(Boolean, default=False, nullable=False)
     onboarding_step = Column(String(50), nullable=True)
-
-    # Referral system
-    referral_credits = Column(Integer, default=0, nullable=False)
-    referred_by_code = Column(String(20), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -40,7 +35,6 @@ class User(Base):
     # Relationships
     jobs = relationship("Job", back_populates="user", cascade="all, delete-orphan")
     messages = relationship("Message", back_populates="user", cascade="all, delete-orphan")
-    payments = relationship("Payment", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, telegram_user_id={self.telegram_user_id}, name={self.name})>"

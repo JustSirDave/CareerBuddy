@@ -105,14 +105,9 @@ async def startup_event():
     """Check required env and register webhook when PUBLIC_URL is public."""
     _configure_structured_logging()
     if settings.app_env == "production":
-        missing = []
-        if not settings.paystack_secret:
-            missing.append("PAYSTACK_SECRET")
         if not settings.telegram_webhook_secret:
-            missing.append("TELEGRAM_WEBHOOK_SECRET")
-        if missing:
             raise RuntimeError(
-                f"Required production secrets not set: {', '.join(missing)}. "
+                "Required production secret not set: TELEGRAM_WEBHOOK_SECRET. "
                 "App will not start."
             )
     required = [

@@ -1,0 +1,12 @@
+# Build context: backend/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.env.*
+output/
+tests/
+.git
+.venv/
+venv/
+*.log
