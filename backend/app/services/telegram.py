@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Xenaptis Technologies
 """
 CareerBuddy - Telegram Bot Service
 Handles sending messages and documents via Telegram Bot API

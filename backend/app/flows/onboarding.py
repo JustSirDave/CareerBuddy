@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Xenaptis Technologies
 """
 Onboarding flow for new CareerBuddy users.
 Handles warm welcome -> intent detection -> flow transition.

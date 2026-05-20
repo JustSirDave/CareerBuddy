@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Xenaptis Technologies
 """
 Delivery confirmation task.
 Sends a 24hr follow-up message after document delivery.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Xenaptis Technologies
 """
 Revamp flow: upload → parse → AI enhance → render → deliver.
 Owns all revamp-specific business logic; conversation_router and webhook delegate here.

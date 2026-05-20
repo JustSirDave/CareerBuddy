@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Xenaptis Technologies
 """
 Step-level input validators for CareerBuddy flows.
 Each returns (is_valid, error_key_or_None).

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Xenaptis Technologies
 """
 CareerBuddy - AI Service
 AI service for generating skills and summaries using OpenAI.

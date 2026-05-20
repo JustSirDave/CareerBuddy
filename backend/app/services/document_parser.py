@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Xenaptis Technologies
 """
 CareerBuddy - Document Parser Service
 Extracts content from uploaded resume files (DOCX, PDF)
