@@ -33,6 +33,7 @@ Ready to begin? Choose a document type below! 👇"""
 GREETINGS = {"hi", "hello", "hey", "start", "menu", "/start"}
 RESETS = {"reset", "/reset", "restart"}
 HELP_COMMANDS = {"/help", "help"}
+ABOUT_COMMANDS = {"/about", "about"}
 STATUS_COMMANDS = {"/status", "status"}
 REVISE_COMMANDS = {"/revise", "revise", "request revision"}
 HISTORY_COMMANDS = {"/history", "history", "my documents", "documents"}
@@ -123,6 +124,7 @@ I help you create professional resumes, CVs, and cover letters tailored to your 
 /status — View your usage this month
 /pdf — Convert your document to PDF
 /reset — Cancel and start over
+/about — About CareerBuddy
 /help — Show this help message
 
 *🆘 Need Support?*
@@ -1120,6 +1122,27 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
             doc_label = {"resume": "resume", "cv": "CV", "cover": "cover letter"}.get(active_for_help.type, active_for_help.type)
             return f"{HELP_MESSAGE}\n\n━━━━━━━━━━━━━━━━━━━━\n📄 *Back to your {doc_label}*\n\nWe're on: *{step_label}*\n\n{step_prompt}"
         return HELP_MESSAGE
+
+    # 1.6.5) About command
+    if t_lower in ABOUT_COMMANDS:
+        return (
+            "🤖 *CareerBuddy*\n\n"
+            "An AI-powered Telegram bot that helps you create professional Resumes, CVs, and Cover Letters "
+            "through a simple conversation — no forms, no uploads, no stress.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🆓 *Free & Open Source*\n"
+            "CareerBuddy is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). "
+            "You are free to use, study, modify, and distribute it.\n\n"
+            "📦 Source code:\n"
+            "github.com/your-username/careerbuddy\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🙏 *Support the Project*\n"
+            "CareerBuddy is free for everyone. If it's been useful to you, "
+            "consider buying us a coffee to keep the servers running:\n"
+            "https://ko-fi.com/careerbuddy\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Type /start to create your next document!"
+        )
 
     # 1.7) Status command
     if t_lower in STATUS_COMMANDS:
