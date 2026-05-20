@@ -3,45 +3,45 @@ CareerBuddy - AI Service
 AI service for generating skills and summaries using OpenAI.
 Author: Sir Dave
 """
+import asyncio
 import json
 import re
-import time
 from typing import List, Dict, Any
 from loguru import logger
-from openai import OpenAI
+from openai import AsyncOpenAI
 from app.config import settings
 
 MAX_AI_RETRIES = 2
 AI_RETRY_DELAY = 1.5  # seconds
 
-_client = None
+_client: AsyncOpenAI | None = None
 
 
-def _get_client():
+def _get_client() -> AsyncOpenAI | None:
     global _client
     if _client is None:
         if settings.openai_api_key:
-            _client = OpenAI(api_key=settings.openai_api_key)
+            _client = AsyncOpenAI(api_key=settings.openai_api_key)
     return _client
 
 
-def _call_with_retry(fn, *args, fallback=None, **kwargs):
-    """Call fn with automatic retry on transient failures. Returns fallback on exhaustion."""
+async def _call_with_retry(fn, *args, fallback=None, **kwargs):
+    """Call async fn with automatic retry on transient failures. Returns fallback on exhaustion."""
     last_exc = None
     for attempt in range(MAX_AI_RETRIES):
         try:
-            return fn(*args, **kwargs)
+            return await fn(*args, **kwargs)
         except Exception as e:
             last_exc = e
             if attempt < MAX_AI_RETRIES - 1:
                 delay = AI_RETRY_DELAY * (attempt + 1)
                 logger.warning(f"[ai] Retry {attempt + 1}/{MAX_AI_RETRIES} after {delay}s: {e}")
-                time.sleep(delay)
+                await asyncio.sleep(delay)
     logger.error(f"[ai] All {MAX_AI_RETRIES} attempts failed: {last_exc}")
     return fallback
 
 
-def generate_skills(target_role: str, basics: Dict, experiences: List[Dict], tier: str = "free") -> List[str]:
+async def generate_skills(target_role: str, basics: Dict, experiences: List[Dict], tier: str = "free") -> List[str]:
     """
     Generate role-specific skill suggestions using OpenAI.
 
@@ -60,12 +60,12 @@ def generate_skills(target_role: str, basics: Dict, experiences: List[Dict], tie
 
     # Route to appropriate tier
     if tier == "pro":
-        return _generate_skills_pro(target_role, basics, experiences)
+        return await _generate_skills_pro(target_role, basics, experiences)
     else:
-        return _generate_skills_basic(target_role, basics, experiences)
+        return await _generate_skills_basic(target_role, basics, experiences)
 
 
-def _generate_skills_basic(target_role: str, basics: Dict, experiences: List[Dict]) -> List[str]:
+async def _generate_skills_basic(target_role: str, basics: Dict, experiences: List[Dict]) -> List[str]:
     """Basic skill generation for free tier - simpler prompt."""
     prompt = f"""List 8-10 relevant skills for a {target_role} role.
 
@@ -77,8 +77,8 @@ Example format: Python, Data Analysis, SQL, Communication, Problem Solving"""
 
     logger.info(f"[ai] Generating basic skills for role: {target_role}")
 
-    def _call():
-        response = _get_client().chat.completions.create(
+    async def _call():
+        response = await _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a resume expert."},
@@ -90,14 +90,14 @@ Example format: Python, Data Analysis, SQL, Communication, Problem Solving"""
         skills_text = response.choices[0].message.content.strip()
         return [s.strip() for s in skills_text.split(",") if s.strip()][:10]
 
-    result = _call_with_retry(_call, fallback=None)
+    result = await _call_with_retry(_call, fallback=None)
     if result:
         logger.info(f"[ai] Generated {len(result)} basic skills")
         return result
     return get_fallback_skills(target_role)
 
 
-def _generate_skills_pro(target_role: str, basics: Dict, experiences: List[Dict]) -> List[str]:
+async def _generate_skills_pro(target_role: str, basics: Dict, experiences: List[Dict]) -> List[str]:
     """Enhanced skill generation for pro tier - detailed analysis."""
     context_parts = [f"Target Role: {target_role}"]
     if basics.get("title"):
@@ -130,8 +130,8 @@ Example: Python, SQL, Power BI, ETL Pipelines, Data Modeling, Statistical Analys
 
     logger.info(f"[ai] Generating pro skills for role: {target_role}")
 
-    def _call():
-        response = _get_client().chat.completions.create(
+    async def _call():
+        response = await _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a professional resume writer helping candidates identify relevant skills."},
@@ -143,14 +143,14 @@ Example: Python, SQL, Power BI, ETL Pipelines, Data Modeling, Statistical Analys
         skills_text = response.choices[0].message.content.strip()
         return [s.strip() for s in skills_text.split(",") if s.strip()][:10]
 
-    result = _call_with_retry(_call, fallback=None)
+    result = await _call_with_retry(_call, fallback=None)
     if result:
         logger.info(f"[ai] Generated {len(result)} pro skills")
         return result
     return get_fallback_skills(target_role)
 
 
-def generate_summary(answers: Dict, tier: str = "free") -> str:
+async def generate_summary(answers: Dict, tier: str = "free") -> str:
     """
     Generate a professional summary from collected resume data using OpenAI.
 
@@ -167,12 +167,12 @@ def generate_summary(answers: Dict, tier: str = "free") -> str:
 
     # Route to appropriate tier
     if tier == "pro":
-        return _generate_summary_pro(answers)
+        return await _generate_summary_pro(answers)
     else:
-        return _generate_summary_basic(answers)
+        return await _generate_summary_basic(answers)
 
 
-def _generate_summary_basic(answers: Dict) -> str:
+async def _generate_summary_basic(answers: Dict) -> str:
     """Basic summary generation for free tier."""
     basics = answers.get("basics", {})
     target_role = answers.get("target_role", "")
@@ -196,8 +196,8 @@ Example: "Experienced data analyst with strong analytical skills and expertise i
 
     logger.info("[ai] Generating basic summary")
 
-    def _call():
-        response = _get_client().chat.completions.create(
+    async def _call():
+        response = await _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a professional resume writer."},
@@ -211,14 +211,14 @@ Example: "Experienced data analyst with strong analytical skills and expertise i
             text = text[1:-1]
         return text
 
-    result = _call_with_retry(_call, fallback=None)
+    result = await _call_with_retry(_call, fallback=None)
     if result:
         logger.info("[ai] Generated basic summary")
         return result
     return get_fallback_summary(answers)
 
 
-def _generate_summary_pro(answers: Dict) -> str:
+async def _generate_summary_pro(answers: Dict) -> str:
     """Enhanced summary generation for pro tier - detailed analysis."""
     target_role = answers.get("target_role", "")
     skills = answers.get("skills", [])
@@ -266,8 +266,8 @@ Example: "Senior Data Analyst with 5+ years of experience transforming complex d
 
     logger.info("[ai] Generating pro summary")
 
-    def _call():
-        response = _get_client().chat.completions.create(
+    async def _call():
+        response = await _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a professional resume writer who creates compelling, natural-sounding summaries."},
@@ -281,7 +281,7 @@ Example: "Senior Data Analyst with 5+ years of experience transforming complex d
             text = text[1:-1]
         return text
 
-    result = _call_with_retry(_call, fallback=None)
+    result = await _call_with_retry(_call, fallback=None)
     if result:
         logger.info(f"[ai] Generated pro summary: {result[:100]}...")
         return result
@@ -305,7 +305,7 @@ def get_fallback_skills(target_role: str) -> List[str]:
         return ["Communication", "Problem Solving", "Teamwork", "Leadership", "Time Management", "Adaptability", "Critical Thinking", "Organization"]
 
 
-def revamp_resume(original_content: str, tier: str = "free") -> str:
+async def revamp_resume(original_content: str, tier: str = "free") -> str:
     """
     Revamp/improve an existing resume using AI.
 
@@ -353,8 +353,8 @@ Return the improved resume content."""
 
     logger.info(f"[ai] Revamping resume (tier: {tier})")
 
-    def _call():
-        response = _get_client().chat.completions.create(
+    async def _call():
+        response = await _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a professional resume writer who improves resume content."},
@@ -365,7 +365,7 @@ Return the improved resume content."""
         )
         return response.choices[0].message.content.strip()
 
-    result = _call_with_retry(_call, fallback=None)
+    result = await _call_with_retry(_call, fallback=None)
     if result:
         logger.info("[ai] Resume revamped successfully")
         return result
@@ -398,7 +398,7 @@ def get_fallback_summary(answers: Dict) -> str:
     return " ".join(parts)
 
 
-def detect_onboarding_intent(user_message: str) -> Dict[str, Any]:
+async def detect_onboarding_intent(user_message: str) -> Dict[str, Any]:
     """
     Classify user's onboarding message into document intent.
     Returns: {intent, confidence, extracted_role, extracted_company}
@@ -418,8 +418,8 @@ Message: "{user_message}"
 """
     fallback = {"intent": "unclear", "confidence": "low", "extracted_role": None, "extracted_company": None}
 
-    def _call():
-        response = _get_client().chat.completions.create(
+    async def _call():
+        response = await _get_client().chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a resume expert. Return only valid JSON."},
@@ -441,5 +441,5 @@ Message: "{user_message}"
             "extracted_company": data.get("extracted_company"),
         }
 
-    result = _call_with_retry(_call, fallback=fallback)
+    result = await _call_with_retry(_call, fallback=fallback)
     return result

@@ -3,22 +3,16 @@ CareerBuddy - Idempotency Service
 Simple Redis-based idempotency checker for webhook deduplication.
 Author: Sir Dave
 """
-import redis
+import redis.asyncio as aioredis
 import os
 from loguru import logger
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 
-try:
-    r = redis.from_url(REDIS_URL, decode_responses=True)
-    r.ping()  # Test connection
-    logger.info(f"[idempotency] Connected to Redis at {REDIS_URL}")
-except Exception as e:
-    logger.error(f"[idempotency] Failed to connect to Redis: {e}")
-    r = None
+r = aioredis.from_url(REDIS_URL, decode_responses=True)
 
 
-def seen_or_mark(key: str, ttl: int = 3600) -> bool:
+async def seen_or_mark(key: str, ttl: int = 3600) -> bool:
     """
         Check if a key has been seen before. If not, mark it.
 
@@ -29,12 +23,8 @@ def seen_or_mark(key: str, ttl: int = 3600) -> bool:
         Returns:
             True if key was already seen, False if this is the first time
     """
-    if r is None:
-        logger.warning("[idempotency] Redis not available, skipping deduplication")
-        return False
-
     try:
-        result = r.set(key, "1", nx=True, ex=ttl)
+        result = await r.set(key, "1", nx=True, ex=ttl)
         if result is None:
             logger.debug(f"[idempotency] Key '{key}' already seen")
             return True

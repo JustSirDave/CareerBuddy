@@ -3,6 +3,7 @@ CareerBuddy - Conversation Router
 Author: Sir Dave
 """
 from __future__ import annotations
+import asyncio
 from datetime import datetime, timedelta, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -550,7 +551,7 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
                 experiences = answers.get("experiences", [])
                 basics = answers.get("basics", {})
                 logger.info(f"[skills] Starting AI skills generation for job {job.id}")
-                suggested_skills = ai.generate_skills(target_role, basics, experiences)
+                suggested_skills = await ai.generate_skills(target_role, basics, experiences)
                 suggested_skills = suggested_skills[:8]
                 answers["ai_suggested_skills"] = suggested_skills
                 job.answers = answers
@@ -594,7 +595,7 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
                 logger.info(f"[summary] User triggered AI generation with wake word: {t_lower}")
                 try:
                     logger.info(f"[summary] Starting AI summary generation for job {job.id}")
-                    summary = ai.generate_summary(answers)
+                    summary = await ai.generate_summary(answers)
                     answers["summary"] = summary
                     job.answers = answers
                     flag_modified(job, "answers")
@@ -716,13 +717,14 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
 
         try:
             logger.info(f"[handle_resume] Rendering document for job.id={job.id}")
+            loop = asyncio.get_event_loop()
             if job.type == "cv":
-                doc_bytes = renderer.render_cv(job)
+                doc_bytes = await loop.run_in_executor(None, renderer.render_cv, job)
             else:
-                doc_bytes = renderer.render_resume(job)
+                doc_bytes = await loop.run_in_executor(None, renderer.render_resume, job)
 
             filename = _generate_filename(job)
-            file_path = storage.save_file_locally(job.id, doc_bytes, filename)
+            file_path = await storage.save_file_locally(job.id, doc_bytes, filename)
 
             job.draft_text = file_path
             job.status = "preview_ready"
@@ -881,9 +883,10 @@ async def handle_cover(db: Session, job: Job, text: str) -> str:
 
             try:
                 logger.info(f"[cover] Rendering cover letter for job.id={job.id}")
-                doc_bytes = renderer.render_cover_letter(job)
+                loop = asyncio.get_event_loop()
+                doc_bytes = await loop.run_in_executor(None, renderer.render_cover_letter, job)
                 filename = _generate_filename(job)
-                file_path = storage.save_file_locally(job.id, doc_bytes, filename)
+                file_path = await storage.save_file_locally(job.id, doc_bytes, filename)
                 job.draft_text = file_path
                 job.status = "preview_ready"
                 db.commit()
@@ -1045,14 +1048,15 @@ async def generate_sample_document(db: Session, user_id: int, template_choice: s
     logger.info(f"[generate_sample] Created sample job.id={job.id} with template={template_choice}")
 
     try:
+        loop = asyncio.get_event_loop()
         if doc_type == "cv":
-            doc_bytes = renderer.render_cv(job)
+            doc_bytes = await loop.run_in_executor(None, renderer.render_cv, job)
         elif doc_type == "cover":
-            doc_bytes = renderer.render_cover_letter(job)
+            doc_bytes = await loop.run_in_executor(None, renderer.render_cover_letter, job)
         else:
-            doc_bytes = renderer.render_resume(job)
+            doc_bytes = await loop.run_in_executor(None, renderer.render_resume, job)
         filename = _generate_filename(job)
-        file_path = storage.save_file_locally(job.id, doc_bytes, filename)
+        file_path = await storage.save_file_locally(job.id, doc_bytes, filename)
         job.status = "completed"
         job.draft_text = file_path
         db.commit()
@@ -1102,7 +1106,7 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         if t_lower in STATUS_COMMANDS:
             summary = payments.get_credit_summary(user)
             return f"📊 *Your credits:*\n{summary}\n\n_What brings you here today? Tell me what you're looking for._"
-        reply = onboarding_flow.handle_onboarding_intent_response(db, user, incoming, telegram_user_id, first_name)
+        reply = await onboarding_flow.handle_onboarding_intent_response(db, user, incoming, telegram_user_id, first_name)
         if reply:
             return reply
 

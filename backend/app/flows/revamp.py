@@ -2,6 +2,7 @@
 Revamp flow: upload → parse → AI enhance → render → deliver.
 Owns all revamp-specific business logic; conversation_router and webhook delegate here.
 """
+import asyncio
 from pathlib import Path
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -51,7 +52,7 @@ async def handle_revamp_step(db: Session, job: Job, text: str) -> str:
     if step == "revamp_processing":
         original = answers.get("original_content", "")
         try:
-            revamped_content = ai.revamp_resume(original)
+            revamped_content = await ai.revamp_resume(original)
             answers["revamped_content"] = revamped_content
             answers["_step"] = "preview"
             job.answers = answers
@@ -85,10 +86,11 @@ async def handle_revamp_step(db: Session, job: Job, text: str) -> str:
 
             try:
                 logger.info(f"[revamp] Rendering revamped document for job.id={job.id}")
-                doc_bytes = renderer.render_revamp(job)
+                loop = asyncio.get_event_loop()
+                doc_bytes = await loop.run_in_executor(None, renderer.render_revamp, job)
                 from app.utils import generate_filename
                 filename = generate_filename(job)
-                file_path = storage.save_file_locally(job.id, doc_bytes, filename)
+                file_path = await storage.save_file_locally(job.id, doc_bytes, filename)
                 job.draft_text = file_path
                 job.status = "preview_ready"
                 answers["_step"] = "done"

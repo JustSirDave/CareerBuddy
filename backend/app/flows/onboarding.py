@@ -40,10 +40,10 @@ def handle_new_user_welcome(db: Session, user: User, first_name: str) -> str:
     return ONBOARDING_WELCOME.format(first_name=first_name)
 
 
-def handle_onboarding_intent_response(
+async def handle_onboarding_intent_response(
     db: Session, user: User, message_text: str, telegram_user_id: str, first_name: str
 ) -> str:
-    result = ai.detect_onboarding_intent(message_text)
+    result = await ai.detect_onboarding_intent(message_text)
     intent = result.get("intent", "unclear")
     confidence = result.get("confidence", "low")
     extracted_role = result.get("extracted_role")

@@ -3,6 +3,7 @@ CareerBuddy - Webhook Router
 Handles Telegram and Paystack webhooks
 Author: Sir Dave
 """
+import asyncio
 from pathlib import Path
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
@@ -74,7 +75,7 @@ async def _process_telegram_update(payload: dict, db):
         username = from_user.get("username")
         msg_id = message.get("message_id")
         
-        if msg_id and seen_or_mark(str(msg_id)):
+        if msg_id and await seen_or_mark(str(msg_id)):
             logger.warning(f"[telegram_webhook] Duplicate document upload msg_id={msg_id}, skipping")
             return
         if chat_id:
@@ -87,7 +88,7 @@ async def _process_telegram_update(payload: dict, db):
         logger.debug("[telegram_webhook] No valid message found, ignoring")
         return
 
-    if msg_id and seen_or_mark(str(msg_id)):
+    if msg_id and await seen_or_mark(str(msg_id)):
         logger.warning(f"[telegram_webhook] Duplicate msg_id={msg_id} from chat_id={chat_id}, skipping")
         return
 
@@ -220,7 +221,8 @@ async def handle_document_upload(chat_id: int | str, document: dict, db: Session
         upload_dir.mkdir(parents=True, exist_ok=True)
 
         upload_path = upload_dir / file_name
-        upload_path.write_bytes(file_bytes)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, upload_path.write_bytes, file_bytes)
 
         logger.info(f"[handle_document_upload] Saved: {upload_path}")
 
@@ -266,7 +268,8 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
             return
 
         # Send document as .docx for review
-        file_bytes = file_path.read_bytes()
+        loop = asyncio.get_event_loop()
+        file_bytes = await loop.run_in_executor(None, file_path.read_bytes)
         send_resp = await send_document(chat_id, file_bytes, filename, caption="📄 *Your Document is Ready!*")
 
         if send_resp and not send_resp.get("error"):
@@ -379,7 +382,7 @@ async def send_pdf_to_user(chat_id: int | str, user_id: str, db: Session):
         # If user uploaded edited DOCX, convert it with LibreOffice
         if latest_uploaded_docx:
             logger.info(f"[send_pdf] User uploaded edited DOCX, using LibreOffice conversion")
-            pdf_bytes, pdf_filename = storage.convert_docx_to_pdf(latest_uploaded_docx)
+            pdf_bytes, pdf_filename = await storage.convert_docx_to_pdf(latest_uploaded_docx)
         else:
             # No upload - generate PDF directly from data (all templates use ReportLab now)
             logger.info(f"[send_pdf] No edited DOCX, generating PDF directly from data")
@@ -387,7 +390,9 @@ async def send_pdf_to_user(chat_id: int | str, user_id: str, db: Session):
             
             # All templates now have direct PDF generation
             try:
-                pdf_bytes = pdf_renderer.render_pdf_from_data(latest_job.answers, template)
+                pdf_bytes = await asyncio.get_event_loop().run_in_executor(
+                    None, pdf_renderer.render_pdf_from_data, latest_job.answers, template
+                )
                 # Generate filename
                 doc_type = latest_job.type or 'document'
                 from datetime import datetime
@@ -403,7 +408,7 @@ async def send_pdf_to_user(chat_id: int | str, user_id: str, db: Session):
                     if docx_files:
                         latest_docx_path = max(docx_files, key=lambda p: p.stat().st_mtime)
                         logger.info(f"[send_pdf] Falling back to LibreOffice for {template}")
-                        pdf_bytes, pdf_filename = storage.convert_docx_to_pdf(latest_docx_path)
+                        pdf_bytes, pdf_filename = await storage.convert_docx_to_pdf(latest_docx_path)
 
         if not pdf_bytes:
             await reply_text(chat_id, "❌ Sorry, I couldn't convert your document to PDF. This feature requires LibreOffice to be installed on the server. Please try converting it manually or contact support.")
@@ -601,9 +606,10 @@ _This may take a few moments._""")
 
             answers = job.answers or {}
             try:
+                cb_loop = asyncio.get_event_loop()
                 if fmt == "pdf":
                     template = answers.get("template", "template_1")
-                    pdf_bytes = pdf_renderer.render_pdf_from_data(answers, template)
+                    pdf_bytes = await cb_loop.run_in_executor(None, pdf_renderer.render_pdf_from_data, answers, template)
                     doc_type = job.type or "document"
                     pdf_filename = f"{doc_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
                     answers["_step"] = "done"
@@ -615,11 +621,11 @@ _This may take a few moments._""")
                     await reply_text(chat_id, "✅ PDF delivered! Type /reset to create another document.")
                 else:
                     if job.type == "cv":
-                        doc_bytes = renderer.render_cv(job)
+                        doc_bytes = await cb_loop.run_in_executor(None, renderer.render_cv, job)
                     else:
-                        doc_bytes = renderer.render_resume(job)
+                        doc_bytes = await cb_loop.run_in_executor(None, renderer.render_resume, job)
                     filename = generate_filename(job)
-                    file_path = storage.save_file_locally(job.id, doc_bytes, filename)
+                    file_path = await storage.save_file_locally(job.id, doc_bytes, filename)
                     job.draft_text = file_path
                     job.status = "preview_ready"
                     answers["_step"] = "done"
