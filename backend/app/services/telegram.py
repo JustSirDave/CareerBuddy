@@ -178,6 +178,57 @@ async def send_onboarding_continue_menu(chat_id: int | str, message: str):
         return {"error": str(e)}
 
 
+async def send_feedback_prompt(chat_id: int | str) -> dict:
+    """Send post-delivery feedback prompt with inline keyboard."""
+    text = "🙏 How was your experience with CareerBuddy?"
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "👍 Loved it!", "callback_data": "feedback_good"},
+                {"text": "👎 Needs work", "callback_data": "feedback_bad"},
+            ],
+            [
+                {"text": "🙈 Skip", "callback_data": "feedback_skip"},
+            ],
+        ]
+    }
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "reply_markup": keyboard}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload)
+            if r.status_code >= 400:
+                logger.error(f"[telegram] send_feedback_prompt failed: {r.status_code} {r.text}")
+            return r.json() if r.content else {}
+    except Exception as e:
+        logger.error(f"[telegram] send_feedback_prompt exception: {e}")
+        return {"error": str(e)}
+
+
+async def forward_bad_feedback(feedback_text: str, username: str | None, from_chat_id: int | str) -> None:
+    """Forward a bad-feedback message to FEEDBACK_CHANNEL_ID."""
+    if not settings.feedback_channel_id:
+        logger.warning("[feedback] FEEDBACK_CHANNEL_ID not set — feedback not forwarded")
+        return
+    sender = f"@{username}" if username else f"chat_id:{from_chat_id}"
+    text = f"📨 *Bad feedback from {sender}:*\n\n{feedback_text}"
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    payload = {
+        "chat_id": settings.feedback_channel_id,
+        "text": text,
+        "parse_mode": "Markdown",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload)
+            if r.status_code >= 400:
+                logger.error(f"[feedback] Forward failed: {r.status_code} {r.text}")
+            else:
+                logger.info(f"[feedback] Forwarded bad feedback from {sender}")
+    except Exception as e:
+        logger.error(f"[feedback] Forward exception: {e}")
+
+
 async def send_document_type_menu(chat_id: int | str, user_tier: str = "free"):
     """
     Send document type selection menu with inline keyboard.

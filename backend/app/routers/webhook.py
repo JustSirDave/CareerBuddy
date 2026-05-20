@@ -15,7 +15,7 @@ from app.services.idempotency import seen_or_mark
 from app.db import get_db
 from app.models.user import User
 from app.models.job import Job
-from app.services.telegram import reply_text, send_choice_menu, send_welcome_menu, send_document, send_document_type_menu, send_typing_action, send_payment_request, send_template_selection, send_onboarding_continue_menu, send_format_menu
+from app.services.telegram import reply_text, send_choice_menu, send_welcome_menu, send_document, send_document_type_menu, send_typing_action, send_template_selection, send_onboarding_continue_menu, send_format_menu, send_feedback_prompt, forward_bad_feedback
 from app.services.conversation_router import handle_inbound
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -286,29 +286,15 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
                     job.status = "done"
                     job.completed_at = datetime.utcnow()
                     db.commit()
-            success_msg = """✅ *Document Delivered as .docx for Review!*
-
-📝 *Review & Edit:*
-• Download the document
-• Open in Microsoft Word or Google Docs
-• Make any changes you want
-• Save your edits
-
-📤 *Convert to PDF (Final Format):*
-When you're happy with your edits:
-1. Send the edited .docx file back to me
-2. Type *convert to pdf* or */pdf*
-3. I'll convert it to PDF for you!
-
-Or if you're happy with it as is:
-• Type */pdf* to convert the current version to PDF
-
-*🔄 Need Another Document?*
-Type /reset to create a new one
-Type /status to check your plan
-
-Good luck with your job search! 🚀"""
+            success_msg = (
+                "✅ *Your document is ready!*\n\n"
+                "📝 Open in Microsoft Word or Google Docs to review and edit.\n\n"
+                "📤 *Want a PDF?* Type */pdf* and I'll convert it for you.\n\n"
+                "🔄 Type /reset to create another document.\n\n"
+                "Good luck with your job search! 🚀"
+            )
             await reply_text(chat_id, success_msg)
+            await send_feedback_prompt(chat_id)
             return
 
         # Fallback to download link
@@ -623,6 +609,7 @@ _This may take a few moments._""")
                     db.commit()
                     await send_document(chat_id, pdf_bytes, pdf_filename, caption="📄 *Your PDF is Ready!*")
                     await reply_text(chat_id, "✅ PDF delivered! Type /reset to create another document.")
+                    await send_feedback_prompt(chat_id)
                 else:
                     if job.type == "cv":
                         doc_bytes = await cb_loop.run_in_executor(None, renderer.render_cv, job)
@@ -637,9 +624,34 @@ _This may take a few moments._""")
                     flag_modified(job, "answers")
                     db.commit()
                     await send_document_to_user(chat_id, job.id, filename, db)
+                    # feedback prompt is sent inside send_document_to_user for docx
             except Exception as e:
                 logger.error(f"[format_callback] Error rendering {fmt}: {e}")
                 await reply_text(chat_id, f"❌ Document generation failed. Please try /reset and try again.")
+
+        elif data == "feedback_good":
+            await reply_text(chat_id, "🎉 Glad to hear it! Good luck with your job search. Type /start whenever you need another document.")
+
+        elif data == "feedback_bad":
+            user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
+            if user:
+                recent_done = (
+                    db.query(Job)
+                    .filter(Job.user_id == user.id, Job.status == "done")
+                    .order_by(Job.created_at.desc())
+                    .first()
+                )
+                if recent_done:
+                    from sqlalchemy.orm.attributes import flag_modified
+                    answers = recent_done.answers if isinstance(recent_done.answers, dict) else {}
+                    answers["_awaiting_feedback"] = True
+                    recent_done.answers = answers
+                    flag_modified(recent_done, "answers")
+                    db.commit()
+            await reply_text(chat_id, "😕 Sorry to hear that! What went wrong? Your feedback helps us improve.\n\n_Just type your message and send it._")
+
+        elif data == "feedback_skip":
+            await reply_text(chat_id, "No problem! Type /start whenever you need another document.")
 
         elif data == "cancel":
             await reply_text(chat_id, "❌ *Cancelled*\n\nNo problem! Type /start when you're ready to create a document.")

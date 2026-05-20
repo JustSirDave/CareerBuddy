@@ -1003,6 +1003,27 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
     db.add(Message(user_id=user.id, direction="inbound", content=incoming))
     db.commit()
 
+    # 1.3) Intercept bad-feedback reply
+    if incoming and not incoming.startswith("/"):
+        recent_done_jobs = (
+            db.query(Job)
+            .filter(Job.user_id == user.id, Job.status == "done")
+            .order_by(Job.created_at.desc())
+            .limit(3)
+            .all()
+        )
+        feedback_job = next(
+            (j for j in recent_done_jobs if isinstance(j.answers, dict) and j.answers.get("_awaiting_feedback")),
+            None,
+        )
+        if feedback_job:
+            from app.services.telegram import forward_bad_feedback
+            await forward_bad_feedback(incoming, telegram_username, from_chat_id=telegram_user_id)
+            feedback_job.answers["_awaiting_feedback"] = False
+            flag_modified(feedback_job, "answers")
+            db.commit()
+            return "🙏 Thank you for your feedback — we'll use it to make CareerBuddy better!"
+
     # 1.4) Onboarding: user awaiting intent response
     onboarding_step = getattr(user, "onboarding_step", None)
     if onboarding_step == "awaiting_intent_response":
