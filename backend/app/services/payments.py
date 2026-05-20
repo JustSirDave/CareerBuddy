@@ -7,6 +7,7 @@ import uuid
 import httpx
 from typing import Dict, Tuple
 from loguru import logger
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -225,47 +226,80 @@ async def initiate_payment(user: User, product_type: str, db: Session) -> Dict:
 
 async def confirm_payment_and_award_credits(reference: str, db: Session):
     """
-    Called from Paystack webhook on charge.success.
-    1. Find Payment by reference
-    2. Verify with Paystack API
-    3. Mark payment confirmed
-    4. Award credits
+    Atomically claim and award credits for a confirmed Paystack payment.
+
+    DB-level idempotency: transitions 'pending' → 'processing' in one UPDATE.
+    Only the request that claims the row (rowcount == 1) proceeds.
+    All others see rowcount == 0 and exit immediately — no race possible.
+
+    Credits and payment status are committed in a single transaction so
+    neither can be applied without the other.
+
     Returns (user, product_type) on success, None otherwise.
     """
-    payment = db.query(Payment).filter(Payment.reference == reference).first()
-    if not payment:
-        logger.warning(f"[payments] Payment not found for reference: {reference}")
-        return None
-    if payment.status in ("success", "confirmed"):
-        logger.info(f"[payments] Payment {reference} already confirmed — idempotent skip")
+    # Fix 2: atomic claim — one UPDATE commits the idempotency lock.
+    # PostgreSQL row-level locking ensures concurrent retries serialize here:
+    # the second UPDATE sees status='processing' (not 'pending') and gets rowcount=0.
+    result = db.execute(
+        text(
+            "UPDATE payments SET status='processing' "
+            "WHERE reference=:ref AND status='pending' "
+            "RETURNING id"
+        ),
+        {"ref": reference},
+    )
+    db.commit()
+    if result.rowcount == 0:
+        logger.info(f"[payments] Payment {reference} already claimed or not found — idempotent exit")
         return None
 
+    payment = db.query(Payment).filter(Payment.reference == reference).first()
+    if not payment:
+        logger.error(f"[payments] Payment record missing after claim: reference={reference}")
+        return None
+
+    # Verify with Paystack API (network call, outside the credit-award transaction)
     verification = await verify_payment(reference)
     if verification.get("error") or verification.get("status") != "success":
         logger.warning(f"[payments] Verification failed for {reference}: {verification}")
+        payment.status = "failed"
+        db.commit()
         return None
-
-    payment.status = "success"
-    payment.raw_webhook = verification
-    db.commit()
 
     user = db.query(User).filter(User.id == payment.user_id).first()
     if not user:
-        logger.error(f"[payments] User not found for payment {reference}")
+        logger.error(
+            f"[payments] User not found after verification: "
+            f"reference={reference} user_id={payment.user_id}"
+        )
+        payment.status = "failed"
+        db.commit()
         return None
 
     product_type = payment.product_type or "resume"
     awards = CREDIT_AWARDS.get(product_type, CREDIT_AWARDS["resume"])
-    user.document_credits = (user.document_credits or 0) + awards["document_credits"]
-    user.cover_letter_credits = (user.cover_letter_credits or 0) + awards["cover_letter_credits"]
-    db.commit()
 
-    logger.info(
-        f"[payments] Credits awarded for {reference}: "
-        f"doc={awards['document_credits']} cl={awards['cover_letter_credits']} "
-        f"user={user.id}"
-    )
-    return (user, product_type)
+    # Fix 1: single commit — payment status and credits are applied together.
+    # If the commit fails, db.rollback() returns both to their pre-commit state.
+    try:
+        payment.status = "success"
+        payment.raw_webhook = verification
+        user.document_credits = (user.document_credits or 0) + awards["document_credits"]
+        user.cover_letter_credits = (user.cover_letter_credits or 0) + awards["cover_letter_credits"]
+        db.commit()
+        logger.info(
+            f"[payments] Credit award committed: reference={reference} "
+            f"doc={awards['document_credits']} cl={awards['cover_letter_credits']} "
+            f"user_id={user.id} telegram_id={user.telegram_user_id}"
+        )
+        return (user, product_type)
+    except Exception as e:
+        db.rollback()
+        logger.error(
+            f"[payments] Credit award rolled back — no partial state: "
+            f"reference={reference} user_id={payment.user_id} error={e}"
+        )
+        return None
 
 
 async def verify_payment(reference: str) -> Dict:
