@@ -1049,7 +1049,7 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
             from app.models.feedback import Feedback
             sender = f"@{telegram_username}" if telegram_username else f"chat_id:{telegram_user_id}"
             logger.info(f"[feedback] Capturing suggestion from {sender}")
-            await send_to_channel(f"💬 *Suggestion from {sender}:*\n\n{incoming}")
+            await send_to_channel(f"💬 Suggestion from {sender}:\n\n{incoming}")
             fb = Feedback(user_id=user.id, job_id=suggestion_job.id, rating="suggest", feedback_text=incoming)
             db.add(fb)
             suggestion_job.answers["_awaiting_suggestion"] = False

@@ -261,7 +261,7 @@ async def send_to_channel(text: str) -> dict:
 async def forward_bad_feedback(feedback_text: str, username: str | None, from_chat_id: int | str) -> None:
     """Forward a bad-feedback typed reply to FEEDBACK_CHANNEL_ID."""
     sender = f"@{username}" if username else f"chat_id:{from_chat_id}"
-    await send_to_channel(f"📨 *Bad feedback from {sender}:*\n\n{feedback_text}")
+    await send_to_channel(f"📨 Bad feedback from {sender}:\n\n{feedback_text}")
 
 
 async def send_document_type_menu(chat_id: int | str, user_tier: str = "free"):

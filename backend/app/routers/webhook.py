@@ -643,7 +643,7 @@ async def handle_callback_query(callback_query: dict, db):
             job_id = str(recent_done.id) if recent_done else "unknown"
             logger.info(f"[feedback_good] Attempting channel send to: '{_settings.feedback_channel_id}' (type: {type(_settings.feedback_channel_id)})")
             try:
-                result = await send_to_channel(f"👍 *Positive feedback*\nUser: {sender} ({chat_id})\nJob: {job_id}")
+                result = await send_to_channel(f"👍 Positive feedback\nUser: {sender} ({chat_id})\nJob: {job_id}")
                 logger.info(f"[feedback_good] Channel send SUCCESS: {result}")
             except Exception as e:
                 logger.error(f"[feedback_good] Channel send FAILED: {e}")
@@ -683,7 +683,7 @@ async def handle_callback_query(callback_query: dict, db):
             from app.services.telegram import send_to_channel
             sender = f"@{username}" if username else f"chat_id:{chat_id}"
             job_id = str(recent_done.id) if recent_done else "unknown"
-            await send_to_channel(f"👎 *Needs work*\nUser: {sender} ({chat_id})\nJob: {job_id}")
+            await send_to_channel(f"👎 Needs work\nUser: {sender} ({chat_id})\nJob: {job_id}")
             await reply_text(chat_id, "😕 Sorry to hear that! What went wrong? Your feedback helps us improve.\n\n_Just type your message and send it._")
 
         elif data == "feedback_suggest":
