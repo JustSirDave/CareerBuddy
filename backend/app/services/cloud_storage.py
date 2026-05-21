@@ -5,6 +5,7 @@ CareerBuddy - Cloudinary Storage
 Uploads, deletes, and resolves URLs for generated documents.
 """
 import asyncio
+import time
 
 import cloudinary
 import cloudinary.uploader
@@ -60,4 +61,20 @@ def get_download_url(job_id: str, filename: str) -> str:
     _configure()
     public_id = f"careerbuddy/jobs/{job_id}/{filename}"
     url, _ = cloudinary.utils.cloudinary_url(public_id, resource_type="raw")
+    return url
+
+
+def get_signed_download_url(job_id: str, filename: str, ttl: int = 3600) -> str:
+    """Generate a signed Cloudinary URL that bypasses account-level access controls."""
+    _configure()
+    public_id = f"careerbuddy/jobs/{job_id}/{filename}"
+    url, _ = cloudinary.utils.cloudinary_url(
+        public_id,
+        resource_type="raw",
+        type="upload",
+        sign_url=True,
+        expires_at=int(time.time()) + ttl,
+        secure=True,
+    )
+    logger.info(f"[cloud_storage] Signed URL generated for {filename} (TTL={ttl}s)")
     return url

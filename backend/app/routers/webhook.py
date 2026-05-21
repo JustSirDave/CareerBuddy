@@ -275,11 +275,14 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
             return
 
         import httpx
+        from app.services.cloud_storage import get_signed_download_url
+        filename = doc_url.split("/")[-1] or filename
+        signed_url = get_signed_download_url(job_id, filename)
+        logger.info(f"[telegram_webhook] Fetching via signed URL for job {job_id}")
         async with httpx.AsyncClient(timeout=30) as client:
-            dl = await client.get(doc_url)
+            dl = await client.get(signed_url)
             dl.raise_for_status()
             file_bytes = dl.content
-        filename = doc_url.split("/")[-1] or filename
         send_resp = await send_document(chat_id, file_bytes, filename, caption="📄 *Your Document is Ready!*")
 
         if send_resp and not send_resp.get("error"):
