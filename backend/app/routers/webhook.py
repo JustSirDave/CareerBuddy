@@ -617,10 +617,11 @@ async def handle_callback_query(callback_query: dict, db):
                 await reply_text(chat_id, "❌ Session expired. Please type /reset to start over.")
 
         elif data == "feedback_good":
-            logger.info(f"[feedback] feedback_good: chat_id={chat_id}")
+            logger.info(f"[feedback] feedback_good: chat_id={chat_id} username={username}")
             user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
             if not user:
                 logger.warning(f"[feedback] feedback_good: user not found for chat_id={chat_id}")
+            recent_done = None
             if user:
                 recent_done = (
                     db.query(Job)
@@ -636,6 +637,10 @@ async def handle_callback_query(callback_query: dict, db):
                 )
                 db.add(fb)
                 db.commit()
+            from app.services.telegram import send_to_channel
+            sender = f"@{username}" if username else f"chat_id:{chat_id}"
+            job_id = str(recent_done.id) if recent_done else "unknown"
+            await send_to_channel(f"👍 *Positive feedback*\nUser: {sender} ({chat_id})\nJob: {job_id}")
             await reply_text(
                 chat_id,
                 "🎉 So glad it helped! Good luck with your job search! 🚀",
@@ -650,10 +655,11 @@ async def handle_callback_query(callback_query: dict, db):
             )
 
         elif data == "feedback_bad":
-            logger.info(f"[feedback] feedback_bad: chat_id={chat_id}")
+            logger.info(f"[feedback] feedback_bad: chat_id={chat_id} username={username}")
             user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
             if not user:
                 logger.warning(f"[feedback] feedback_bad: user not found for chat_id={chat_id}")
+            recent_done = None
             if user:
                 recent_done = (
                     db.query(Job)
@@ -668,17 +674,30 @@ async def handle_callback_query(callback_query: dict, db):
                     recent_done.answers = answers
                     flag_modified(recent_done, "answers")
                     db.commit()
+            from app.services.telegram import send_to_channel
+            sender = f"@{username}" if username else f"chat_id:{chat_id}"
+            job_id = str(recent_done.id) if recent_done else "unknown"
+            await send_to_channel(f"👎 *Needs work*\nUser: {sender} ({chat_id})\nJob: {job_id}")
             await reply_text(chat_id, "😕 Sorry to hear that! What went wrong? Your feedback helps us improve.\n\n_Just type your message and send it._")
 
-        elif data == "feedback_skip":
-            await reply_text(
-                chat_id,
-                "💛 CareerBuddy is free and open source.\n\n"
-                "If it helped you land that job, consider supporting the project — "
-                "it keeps the bot running for everyone:\n\n"
-                "☕ https://ko-fi.com/xenaptis\n"
-                "⭐ https://github.com/xenaptis/careerbuddy",
-            )
+        elif data == "feedback_suggest":
+            logger.info(f"[feedback] feedback_suggest: chat_id={chat_id} username={username}")
+            user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
+            if user:
+                recent_done = (
+                    db.query(Job)
+                    .filter(Job.user_id == user.id, Job.status == "done")
+                    .order_by(Job.created_at.desc())
+                    .first()
+                )
+                if recent_done:
+                    from sqlalchemy.orm.attributes import flag_modified
+                    answers = recent_done.answers if isinstance(recent_done.answers, dict) else {}
+                    answers["_awaiting_suggestion"] = True
+                    recent_done.answers = answers
+                    flag_modified(recent_done, "answers")
+                    db.commit()
+            await reply_text(chat_id, "💬 We'd love to hear from you!\n\nWhat feature would you like to see, or what could we do better?\n\n_Just type your suggestion and send it._")
 
         elif data in ("step_done", "step_continue", "step_skip", "add_another"):
             step_text_map = {

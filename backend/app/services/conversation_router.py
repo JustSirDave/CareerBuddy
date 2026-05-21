@@ -1040,6 +1040,24 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
             db.commit()
             return "🙏 Thank you for your feedback — we'll use it to make CareerBuddy better!"
 
+        suggestion_job = next(
+            (j for j in recent_done_jobs if isinstance(j.answers, dict) and j.answers.get("_awaiting_suggestion")),
+            None,
+        )
+        if suggestion_job:
+            from app.services.telegram import send_to_channel
+            from app.models.feedback import Feedback
+            sender = f"@{telegram_username}" if telegram_username else f"chat_id:{telegram_user_id}"
+            logger.info(f"[feedback] Capturing suggestion from {sender}")
+            await send_to_channel(f"💬 *Suggestion from {sender}:*\n\n{incoming}")
+            fb = Feedback(user_id=user.id, job_id=suggestion_job.id, rating="suggest", feedback_text=incoming)
+            db.add(fb)
+            suggestion_job.answers["_awaiting_suggestion"] = False
+            flag_modified(suggestion_job, "answers")
+            db.commit()
+            logger.info(f"[feedback] Suggestion captured and forwarded from {sender}")
+            return "✅ Thanks for your suggestion! We really appreciate it. 🙏"
+
     # 1.4) Onboarding: user awaiting intent response
     onboarding_step = getattr(user, "onboarding_step", None)
     if onboarding_step == "awaiting_intent_response":
