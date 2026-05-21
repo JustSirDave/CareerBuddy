@@ -873,11 +873,126 @@ def render_template_3_pdf(answers: dict) -> bytes:
     return buffer.getvalue()
 
 
-def render_pdf_from_data(answers: dict, template: str) -> bytes:
+def render_cover_letter_pdf(answers: dict) -> bytes:
+    """Generate a professional cover letter PDF using ReportLab."""
+    basics = answers.get("basics", {}) or {}
+    name = basics.get("name", "")
+    email = basics.get("email", "")
+    phone = basics.get("phone", "")
+    role = answers.get("cover_role", "")
+    company = answers.get("cover_company", "")
+    years_exp = answers.get("years_experience", "")
+    industries = answers.get("industries", "")
+    interest_reason = answers.get("interest_reason", "")
+    current_title = answers.get("current_title", "")
+    current_employer = answers.get("current_employer", "")
+    achievement_1 = answers.get("achievement_1", "")
+    achievement_2 = answers.get("achievement_2", "")
+    key_skills = answers.get("cover_key_skills", [])
+    company_goal = answers.get("company_goal", "")
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=letter,
+        rightMargin=inch, leftMargin=inch,
+        topMargin=inch, bottomMargin=inch,
+    )
+    styles = getSampleStyleSheet()
+    name_style = ParagraphStyle("CLName", parent=styles["Title"], fontSize=16, spaceAfter=4, alignment=TA_CENTER)
+    contact_style = ParagraphStyle("CLContact", parent=styles["Normal"], fontSize=10, spaceAfter=20, alignment=TA_CENTER)
+    body_style = ParagraphStyle("CLBody", parent=styles["Normal"], fontSize=11, leading=17, spaceAfter=14, alignment=TA_JUSTIFY)
+
+    story = []
+    if name:
+        story.append(Paragraph(name, name_style))
+    contact_parts = [p for p in [email, phone] if p]
+    if contact_parts:
+        story.append(Paragraph(" | ".join(contact_parts), contact_style))
+
+    greeting = "Dear Hiring Manager,"
+    story.append(Paragraph(greeting, body_style))
+
+    # Opening
+    opening = ""
+    if role and company:
+        opening = f"I am writing to express my interest in the {role} position at {company}."
+        if interest_reason:
+            opening += f" {interest_reason}."
+    if opening:
+        story.append(Paragraph(opening, body_style))
+
+    # Experience overview
+    if years_exp or industries:
+        exp = f"With {years_exp} of experience" if years_exp else "With extensive experience"
+        if industries:
+            exp += f" in {industries}"
+        if current_title and current_employer:
+            exp += f", and as {current_title} at {current_employer}"
+        exp += ", I have developed the expertise needed to excel in this role."
+        story.append(Paragraph(exp, body_style))
+
+    # Achievements
+    for ach in [achievement_1, achievement_2]:
+        if ach:
+            story.append(Paragraph(f"• {ach}", body_style))
+
+    # Skills
+    if key_skills:
+        skills_list = key_skills if isinstance(key_skills, list) else [key_skills]
+        story.append(Paragraph("Key skills: " + ", ".join(skills_list), body_style))
+
+    # Closing
+    closing = "I am excited about the opportunity to bring my skills to your team"
+    if company_goal:
+        closing += f" and help {company_goal}"
+    closing += ". I look forward to discussing how I can contribute."
+    story.append(Paragraph(closing, body_style))
+    story.append(Spacer(1, 24))
+    story.append(Paragraph("Sincerely,", body_style))
+    story.append(Spacer(1, 24))
+    if name:
+        story.append(Paragraph(name, body_style))
+
+    doc.build(story)
+    logger.info("[pdf_renderer] Generated cover letter PDF")
+    return buffer.getvalue()
+
+
+def render_revamp_pdf(answers: dict) -> bytes:
+    """Generate a PDF from AI-revamped resume content."""
+    improved_text = answers.get("revamped_content") or answers.get("original_content") or ""
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=letter,
+        rightMargin=0.75 * inch, leftMargin=0.75 * inch,
+        topMargin=0.75 * inch, bottomMargin=0.75 * inch,
+    )
+    styles = getSampleStyleSheet()
+    heading_style = ParagraphStyle("RVHeading", parent=styles["Heading1"], fontSize=14, spaceAfter=12)
+    body_style = ParagraphStyle("RVBody", parent=styles["Normal"], fontSize=11, leading=16, spaceAfter=6)
+
+    story = [Paragraph("IMPROVED RESUME CONTENT", heading_style), Spacer(1, 12)]
+    for line in improved_text.splitlines():
+        if not line.strip():
+            story.append(Spacer(1, 6))
+        else:
+            story.append(Paragraph(line.strip(), body_style))
+
+    doc.build(story)
+    logger.info("[pdf_renderer] Generated revamp PDF")
+    return buffer.getvalue()
+
+
+def render_pdf_from_data(answers: dict, template: str = "template_1", doc_type: str = "resume") -> bytes:
     """
-    Main entry point for PDF generation from data
-    Routes to the appropriate template renderer
+    Main entry point for PDF generation.
+    Routes by doc_type first, then by template for resume/cv.
     """
+    if doc_type == "cover":
+        return render_cover_letter_pdf(answers)
+    if doc_type == "revamp":
+        return render_revamp_pdf(answers)
     if template == 'template_1':
         return render_template_1_pdf(answers)
     elif template == 'template_2':
@@ -885,4 +1000,4 @@ def render_pdf_from_data(answers: dict, template: str) -> bytes:
     elif template == 'template_3':
         return render_template_3_pdf(answers)
     else:
-        raise ValueError(f"Unknown template: {template}")
+        return render_template_1_pdf(answers)

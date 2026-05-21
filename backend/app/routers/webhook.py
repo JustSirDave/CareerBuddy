@@ -16,7 +16,7 @@ from app.services.idempotency import seen_or_mark
 from app.db import get_db
 from app.models.user import User
 from app.models.job import Job
-from app.services.telegram import reply_text, send_choice_menu, send_welcome_menu, send_document, send_document_type_menu, send_typing_action, send_template_selection, send_onboarding_continue_menu, send_format_menu, send_feedback_prompt, forward_bad_feedback
+from app.services.telegram import reply_text, send_choice_menu, send_welcome_menu, send_document, send_document_type_menu, send_typing_action, send_template_selection, send_onboarding_continue_menu, send_feedback_prompt, forward_bad_feedback, send_confirm_menu, send_revision_confirm_menu
 from app.services.conversation_router import handle_inbound
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -128,10 +128,13 @@ async def _process_telegram_update(payload: dict, db):
             user_id = parts[1]
             await send_pdf_to_user(chat_id, user_id, db)
         return
-    if reply and reply.startswith("__SHOW_FORMAT_MENU__|"):
-        parts = reply.split("|", 1)
-        if len(parts) == 2:
-            await send_format_menu(chat_id, parts[1])
+    if reply and reply.startswith("__CONFIRM_REVISION__|"):
+        question = reply[len("__CONFIRM_REVISION__|"):]
+        await send_revision_confirm_menu(chat_id, question)
+        return
+    if reply and reply.startswith("__CONFIRM__|"):
+        question = reply[len("__CONFIRM__|"):]
+        await send_confirm_menu(chat_id, question)
         return
     if reply:
         await reply_text(chat_id, reply)
@@ -283,8 +286,7 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
                 db.commit()
             success_msg = (
                 "✅ *Your document is ready!*\n\n"
-                "📝 Open in Microsoft Word or Google Docs to review and edit.\n\n"
-                "📤 *Want a PDF?* Type */pdf* and I'll convert it for you.\n\n"
+                "📄 Your PDF is ready to send to recruiters and upload to job boards.\n\n"
                 "🔄 Type /reset to create another document.\n\n"
                 "Good luck with your job search! 🚀"
             )
@@ -301,6 +303,7 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
             f"Reply /reset to create another document."
         )
         await reply_text(chat_id, message)
+        await send_feedback_prompt(chat_id)
         logger.info(f"[telegram_webhook] Fallback Cloudinary link sent to {chat_id}")
 
     except Exception as e:
@@ -555,59 +558,11 @@ Ready to create? Type /start!"""
             else:
                 await reply_text(chat_id, "❌ Session expired. Please type /reset to start over.")
 
-        elif data.startswith("format_docx|") or data.startswith("format_pdf|"):
-            fmt = "pdf" if data.startswith("format_pdf|") else "docx"
-            job_id = data.split("|", 1)[1] if "|" in data else None
-            if not job_id:
-                await reply_text(chat_id, "❌ Session expired. Please type /reset.")
-                return {"ok": True}
-
-            job = db.query(Job).filter(Job.id == job_id).first()
-            if not job:
-                await reply_text(chat_id, "❌ Session expired. Please type /reset.")
-                return {"ok": True}
-
-            from app.services import renderer, storage, pdf_renderer
-            from app.utils import generate_filename
-            from sqlalchemy.orm.attributes import flag_modified
-            from datetime import datetime
-
-            answers = job.answers or {}
-            try:
-                cb_loop = asyncio.get_event_loop()
-                if fmt == "pdf":
-                    template = answers.get("template", "template_1")
-                    pdf_bytes = await cb_loop.run_in_executor(None, pdf_renderer.render_pdf_from_data, answers, template)
-                    doc_type = job.type or "document"
-                    pdf_filename = f"{doc_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-                    answers["_step"] = "done"
-                    job.status = "preview_ready"
-                    job.answers = answers
-                    flag_modified(job, "answers")
-                    db.commit()
-                    await send_document(chat_id, pdf_bytes, pdf_filename, caption="📄 *Your PDF is Ready!*")
-                    await reply_text(chat_id, "✅ PDF delivered! Type /reset to create another document.")
-                    await send_feedback_prompt(chat_id)
-                else:
-                    if job.type == "cv":
-                        doc_bytes = await cb_loop.run_in_executor(None, renderer.render_cv, job)
-                    else:
-                        doc_bytes = await cb_loop.run_in_executor(None, renderer.render_resume, job)
-                    filename = generate_filename(job)
-                    job.draft_text = await storage.save_document(job.id, doc_bytes, filename)
-                    job.status = "preview_ready"
-                    answers["_step"] = "done"
-                    job.answers = answers
-                    flag_modified(job, "answers")
-                    db.commit()
-                    await send_document_to_user(chat_id, job.id, filename, db)
-                    # feedback prompt is sent inside send_document_to_user for docx
-            except Exception as e:
-                logger.error(f"[format_callback] Error rendering {fmt}: {e}")
-                await reply_text(chat_id, f"❌ Document generation failed. Please try /reset and try again.")
-
         elif data == "feedback_good":
+            logger.info(f"[feedback] feedback_good: chat_id={chat_id}")
             user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
+            if not user:
+                logger.warning(f"[feedback] feedback_good: user not found for chat_id={chat_id}")
             if user:
                 recent_done = (
                     db.query(Job)
@@ -623,10 +578,20 @@ Ready to create? Type /start!"""
                 )
                 db.add(fb)
                 db.commit()
-            await reply_text(chat_id, "🎉 Glad to hear it! Good luck with your job search. Type /start whenever you need another document.")
+            await reply_text(
+                chat_id,
+                "🎉 So glad it helped!\n\n"
+                "If CareerBuddy made your job search a little easier, consider buying us a coffee ☕ "
+                "— it keeps the service free for everyone:\n\n"
+                "https://ko-fi.com/careerbuddy\n\n"
+                "Good luck out there! 🚀",
+            )
 
         elif data == "feedback_bad":
+            logger.info(f"[feedback] feedback_bad: chat_id={chat_id}")
             user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
+            if not user:
+                logger.warning(f"[feedback] feedback_bad: user not found for chat_id={chat_id}")
             if user:
                 recent_done = (
                     db.query(Job)
@@ -644,10 +609,30 @@ Ready to create? Type /start!"""
             await reply_text(chat_id, "😕 Sorry to hear that! What went wrong? Your feedback helps us improve.\n\n_Just type your message and send it._")
 
         elif data == "feedback_skip":
-            await reply_text(chat_id, "No problem! Type /start whenever you need another document.")
+            pass  # end silently — callback query already answered above
 
         elif data == "cancel":
             await reply_text(chat_id, "❌ *Cancelled*\n\nNo problem! Type /start when you're ready to create a document.")
+
+        elif data in ("confirm_yes", "confirm_no", "confirm_back"):
+            text_map = {"confirm_yes": "yes", "confirm_no": "no", "confirm_back": "back"}
+            reply = await handle_inbound(db, str(chat_id), text_map[data], telegram_username=username)
+            if reply and reply.startswith("__CONFIRM_REVISION__|"):
+                await send_revision_confirm_menu(chat_id, reply[len("__CONFIRM_REVISION__|"):])
+            elif reply and reply.startswith("__CONFIRM__|"):
+                await send_confirm_menu(chat_id, reply[len("__CONFIRM__|"):])
+            elif reply and reply.startswith("__SEND_DOCUMENT__|"):
+                parts = reply.split("|")
+                if len(parts) == 3:
+                    await send_document_to_user(chat_id, parts[1], parts[2], db)
+            elif reply and reply.startswith("__SHOW_DOCUMENT_MENU__|"):
+                parts = reply.split("|", 2)
+                if len(parts) >= 2:
+                    if len(parts) == 3:
+                        await reply_text(chat_id, parts[2])
+                    await send_document_type_menu(chat_id, parts[1])
+            elif reply:
+                await reply_text(chat_id, reply)
 
         return {"ok": True}
 

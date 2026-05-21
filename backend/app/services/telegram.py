@@ -207,16 +207,67 @@ async def send_feedback_prompt(chat_id: int | str) -> dict:
         return {"error": str(e)}
 
 
+async def send_confirm_menu(chat_id: int | str, text: str) -> dict:
+    """Send a message with ✅ Yes / ❌ No inline keyboard buttons."""
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "✅ Yes", "callback_data": "confirm_yes"},
+            {"text": "❌ No", "callback_data": "confirm_no"},
+        ]]
+    }
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": keyboard}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload)
+            if r.status_code >= 400:
+                logger.error(f"[telegram] send_confirm_menu failed: {r.status_code} {r.text}")
+            return r.json() if r.content else {}
+    except Exception as e:
+        logger.error(f"[telegram] send_confirm_menu exception: {e}")
+        return {"error": str(e)}
+
+
+async def send_revision_confirm_menu(chat_id: int | str, text: str) -> dict:
+    """Send a message with ✅ Regenerate / ◀️ Back inline keyboard buttons."""
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "✅ Regenerate", "callback_data": "confirm_yes"},
+            {"text": "◀️ Back to sections", "callback_data": "confirm_back"},
+        ]]
+    }
+    url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown", "reply_markup": keyboard}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload)
+            if r.status_code >= 400:
+                logger.error(f"[telegram] send_revision_confirm_menu failed: {r.status_code} {r.text}")
+            return r.json() if r.content else {}
+    except Exception as e:
+        logger.error(f"[telegram] send_revision_confirm_menu exception: {e}")
+        return {"error": str(e)}
+
+
 async def forward_bad_feedback(feedback_text: str, username: str | None, from_chat_id: int | str) -> None:
     """Forward a bad-feedback message to FEEDBACK_CHANNEL_ID."""
     if not settings.feedback_channel_id:
         logger.warning("[feedback] FEEDBACK_CHANNEL_ID not set — feedback not forwarded")
         return
+
+    # Telegram channels need a numeric chat_id; cast when possible
+    channel_id: int | str = settings.feedback_channel_id
+    try:
+        channel_id = int(channel_id)
+    except (ValueError, TypeError):
+        pass  # keep as string (e.g. @channelname)
+
     sender = f"@{username}" if username else f"chat_id:{from_chat_id}"
+    logger.info(f"[feedback] Forwarding bad feedback to channel={channel_id} from={sender}")
     text = f"📨 *Bad feedback from {sender}:*\n\n{feedback_text}"
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
     payload = {
-        "chat_id": settings.feedback_channel_id,
+        "chat_id": channel_id,
         "text": text,
         "parse_mode": "Markdown",
     }
@@ -224,9 +275,9 @@ async def forward_bad_feedback(feedback_text: str, username: str | None, from_ch
         async with httpx.AsyncClient(timeout=20) as client:
             r = await client.post(url, json=payload)
             if r.status_code >= 400:
-                logger.error(f"[feedback] Forward failed: {r.status_code} {r.text}")
+                logger.error(f"[feedback] Forward failed: status={r.status_code} body={r.text}")
             else:
-                logger.info(f"[feedback] Forwarded bad feedback from {sender}")
+                logger.info(f"[feedback] Forwarded bad feedback from {sender} — ok")
     except Exception as e:
         logger.error(f"[feedback] Forward exception: {e}")
 

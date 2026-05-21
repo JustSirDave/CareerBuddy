@@ -116,6 +116,9 @@ async def startup_event():
     missing = [k for k, v in required if not v]
     if missing:
         logger.warning(f"[BOOT] Missing required env: {', '.join(missing)}")
+    logger.info(
+        f"[BOOT] FEEDBACK_CHANNEL_ID={'set (' + settings.feedback_channel_id + ')' if settings.feedback_channel_id else 'NOT SET'}"
+    )
     await _register_telegram_webhook()
     from app.services.scheduler import start_scheduler
     start_scheduler()

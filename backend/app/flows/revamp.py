@@ -61,10 +61,10 @@ async def handle_revamp_step(db: Session, job: Job, text: str) -> str:
             flag_modified(job, "answers")
             db.commit()
             preview = (
-                f"🎯 *AI-Enhanced Resume*\n\n"
+                f"__CONFIRM__|🎯 *AI-Enhanced Resume*\n\n"
                 f"{revamped_content[:500]}{'...' if len(revamped_content) > 500 else ''}\n\n"
                 "---\n"
-                "Reply *yes* to generate your improved document, or */reset* to start over."
+                "Ready to generate your improved document?"
             )
             return preview
         except Exception as e:
@@ -82,12 +82,15 @@ async def handle_revamp_step(db: Session, job: Job, text: str) -> str:
             if limit_msg:
                 return limit_msg
             try:
-                logger.info(f"[revamp] Rendering revamped document for job.id={job.id}")
-                loop = asyncio.get_event_loop()
-                doc_bytes = await loop.run_in_executor(None, renderer.render_revamp, job)
+                logger.info(f"[revamp] Rendering revamped PDF for job.id={job.id}")
+                from app.services import pdf_renderer
                 from app.utils import generate_filename
+                loop = asyncio.get_event_loop()
+                pdf_bytes = await loop.run_in_executor(
+                    None, pdf_renderer.render_pdf_from_data, answers, "template_1", "revamp"
+                )
                 filename = generate_filename(job)
-                job.draft_text = await storage.save_document(job.id, doc_bytes, filename)
+                job.draft_text = await storage.save_document(job.id, pdf_bytes, filename)
                 job.status = "preview_ready"
                 answers["_step"] = "done"
                 job.answers = answers
@@ -102,7 +105,7 @@ async def handle_revamp_step(db: Session, job: Job, text: str) -> str:
                 db.commit()
                 return f"❌ Sorry, document generation failed: {str(e)}"
 
-        return "Reply *yes* to generate your document, or */reset* to start over."
+        return "__CONFIRM__|Ready to generate your improved document?"
 
     return resume_flow.QUESTIONS.get(step, resume_flow.QUESTIONS["basics"])
 

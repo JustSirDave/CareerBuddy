@@ -32,11 +32,26 @@ def verify_download_token(job_id: str, token: str, secret: str) -> bool:
 
 
 def generate_filename(job) -> str:
-    """Generate a user-friendly document filename from a Job instance."""
+    """Generate document filename: firstname_lastname_doctype.pdf (FIX 3 naming)."""
     answers = job.answers or {}
     basics = answers.get("basics", {}) or {}
-    name = basics.get("name", "Document")
-    clean_name = re.sub(r'[<>:"/\\|?*]', "", str(name))
-    doc_map = {"resume": "Resume", "cv": "CV", "cover": "Cover Letter", "revamp": "Revamp"}
-    doc_type = doc_map.get(job.type, job.type.capitalize() if job.type else "Document")
-    return f"{clean_name} - {doc_type}.docx"
+    raw_name = (basics.get("name") or "").strip()
+
+    def _slug(s: str) -> str:
+        return re.sub(r'[^a-z0-9]+', '_', s.lower()).strip('_')
+
+    if raw_name:
+        parts = raw_name.split()
+        if len(parts) >= 2:
+            name_slug = f"{_slug(parts[0])}_{_slug(parts[-1])}"
+        else:
+            name_slug = _slug(parts[0])
+    else:
+        job_id_short = str(getattr(job, 'id', 'unknown'))[:8]
+        doc_map = {"resume": "resume", "cv": "cv", "cover": "cover_letter", "revamp": "revamp"}
+        dt = doc_map.get(job.type, job.type or "document")
+        return f"careerbuddy_{dt}_{job_id_short}.pdf"
+
+    doc_map = {"resume": "resume", "cv": "cv", "cover": "cover_letter", "revamp": "revamp"}
+    doc_type = doc_map.get(job.type, job.type or "document")
+    return f"{name_slug}_{doc_type}.pdf"

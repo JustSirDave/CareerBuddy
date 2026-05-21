@@ -75,7 +75,7 @@ class TestFilenameGeneration:
             },
         )
         filename = _generate_filename(job)
-        assert filename == "John Doe - Resume.docx"
+        assert filename == "john_doe_resume.pdf"
 
     def test_generate_cv_filename(self, db_session, test_user):
         job = Job(
@@ -84,7 +84,7 @@ class TestFilenameGeneration:
             answers={"basics": {"name": "Jane Smith"}},
         )
         filename = _generate_filename(job)
-        assert filename == "Jane Smith - CV.docx"
+        assert filename == "jane_smith_cv.pdf"
 
     def test_generate_cover_filename(self, db_session, test_user):
         job = Job(
@@ -93,7 +93,7 @@ class TestFilenameGeneration:
             answers={"basics": {"name": "Alex Brown"}},
         )
         filename = _generate_filename(job)
-        assert filename == "Alex Brown - Cover Letter.docx"
+        assert filename == "alex_brown_cover_letter.pdf"
 
     def test_filename_with_special_characters(self, db_session, test_user):
         job = Job(
@@ -102,7 +102,7 @@ class TestFilenameGeneration:
             answers={"basics": {"name": "José María O'Brien"}},
         )
         filename = _generate_filename(job)
-        assert "José María O'Brien" in filename or "Jose" in filename
+        assert filename.endswith("_resume.pdf")
 
 
 class TestAdminAuthentication:

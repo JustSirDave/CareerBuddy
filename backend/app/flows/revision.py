@@ -8,7 +8,7 @@ import re
 from datetime import datetime
 from app.models import Job
 from app.flows import resume as resume_flow
-from app.services import renderer, storage
+from app.services import storage, pdf_renderer
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from loguru import logger
@@ -228,10 +228,9 @@ def _show_revision_confirmation(db: Session, job: Job, section_key: str) -> str:
 
     doc_label = {"resume": "resume", "cv": "CV", "cover": "cover letter"}.get(job.type, job.type)
     return (
-        f"Here's what will change in your {doc_label}:\n\n"
+        f"__CONFIRM_REVISION__|Here's what will change in your {doc_label}:\n\n"
         f"✓ *{section_label}* updated\n\n"
-        "Ready to regenerate your document?\n\n"
-        "Type *yes* to regenerate, or *back* to pick a different section."
+        "Ready to regenerate your document?"
     )
 
 
@@ -247,7 +246,7 @@ def _handle_revision_confirmation(db: Session, job: Job, message_text: str, tele
         return start_revision(db, job, telegram_id)
 
     if text not in ("yes", "y", "regenerate"):
-        return "Type *yes* to regenerate, or *back* to pick a different section."
+        return "__CONFIRM_REVISION__|Ready to regenerate your document?"
 
     # Merge revision_answers into job.answers
     rev_answers = job.revision_answers or {}
@@ -265,17 +264,13 @@ def _handle_revision_confirmation(db: Session, job: Job, message_text: str, tele
     db.commit()
     db.refresh(job)
 
-    # Regenerate document
+    # Regenerate document as PDF
     try:
-        if job.type == "cv":
-            doc_bytes = renderer.render_cv(job)
-        elif job.type == "cover":
-            doc_bytes = renderer.render_cover_letter(job)
-        else:
-            doc_bytes = renderer.render_resume(job)
-
+        answers = job.answers or {}
+        template = answers.get("template", "template_1")
+        pdf_bytes = pdf_renderer.render_pdf_from_data(answers, template, job.type)
         filename = _generate_filename(job)
-        job.draft_text = await storage.save_document(job.id, doc_bytes, filename)
+        job.draft_text = await storage.save_document(job.id, pdf_bytes, filename)
         db.commit()
 
         return f"__SEND_DOCUMENT__|{job.id}|{filename}"

@@ -135,10 +135,10 @@ class TestPDFGeneration:
         assert pdf3 is not None
         assert pdf3[:4] == b'%PDF'
     
-    def test_invalid_template_raises_error(self):
-        """Test that invalid template name raises ValueError"""
-        with pytest.raises(ValueError, match="Unknown template"):
-            pdf_renderer.render_pdf_from_data(SAMPLE_DATA, 'template_invalid')
+    def test_invalid_template_falls_back_to_template_1(self):
+        """Unknown template name falls back to template_1 instead of raising."""
+        pdf = pdf_renderer.render_pdf_from_data(SAMPLE_DATA, 'template_invalid')
+        assert pdf[:4] == b'%PDF'
     
     def test_minimal_data_generates_pdf(self):
         """Test PDF generation with minimal data"""

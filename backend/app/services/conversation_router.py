@@ -14,7 +14,7 @@ from app.flows import resume as resume_flow
 from app.flows import onboarding as onboarding_flow
 from app.flows.validators import validate_basics, validate_experience_bullets
 from app.services.idempotency import seen_or_mark
-from app.services import renderer, storage, ai
+from app.services import renderer, storage, ai, pdf_renderer
 from app.services.error_handler import handle_error, ErrorType, ERROR_MESSAGES
 
 DROPOUT_HOURS = 6
@@ -580,12 +580,10 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
                     flag_modified(job, "answers")
                     db.commit()
                     logger.info(f"[summary] AI summary generated successfully for job {job.id}")
-                    return (f"✨ *AI-Generated Professional Summary:*\n\n"
+                    return (f"__CONFIRM__|✨ *AI-Generated Professional Summary:*\n\n"
                             f"{summary}\n\n"
                             f"━━━━━━━━━━━━━━━━\n\n"
-                            f"✅ Happy with this? Type *yes* to continue.\n"
-                            f"📝 Or send your own summary to replace it.\n"
-                            f"🔄 Type *continue* to see it again.")
+                            f"Happy with this? Or type your own summary below.")
                 except Exception as e:
                     logger.error(f"[summary] AI generation failed: {e}")
                     return ("⚠️ AI summary generation unavailable.\n\n"
@@ -599,17 +597,16 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
                 db.commit()
                 _advance(db, job, answers, "preview")
                 preview_text = _format_preview(answers)
-                return f"{preview_text}\n\n✅ Reply *yes* to generate your document or */reset* to start over!"
+                return f"__CONFIRM__|{preview_text}\n\nLooks good? Tap *Yes* to generate your document."
 
             return ("⏳ *Ready to generate your AI summary!*\n\n"
                     "Type *continue* to start AI generation, or *skip* to write your own.")
 
         if t_lower in WAKE_WORDS and t_lower not in {"yes", "y", "ok", "okay", "good", "done"}:
-            return (f"✨ *Your AI-Generated Professional Summary:*\n\n"
+            return (f"__CONFIRM__|✨ *Your AI-Generated Professional Summary:*\n\n"
                     f"{answers['summary']}\n\n"
                     f"━━━━━━━━━━━━━━━━\n\n"
-                    f"✅ Happy with this? Type *yes* to continue.\n"
-                    f"📝 Or send your own summary to replace it.")
+                    f"Happy with this? Or type your own summary below.")
 
         if t_lower in {"yes", "y", "ok", "okay", "good", "done"}:
             pass
@@ -619,15 +616,14 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
             flag_modified(job, "answers")
             db.commit()
         else:
-            return (f"✨ *Your Professional Summary:*\n\n"
+            return (f"__CONFIRM__|✨ *Your Professional Summary:*\n\n"
                     f"{answers['summary']}\n\n"
                     f"━━━━━━━━━━━━━━━━\n\n"
-                    f"Type *yes* to accept, or send your own summary.\n"
-                    f"Or type *continue* to see it again.")
+                    f"Accept this summary? Or type your own below.")
 
         _advance(db, job, answers, "preview")
         preview_text = _format_preview(answers)
-        return f"{preview_text}\n\n✅ Reply *yes* to generate your document or */reset* to start over!"
+        return f"__CONFIRM__|{preview_text}\n\nLooks good? Tap *Yes* to generate your document."
 
     # ---- PERSONAL INFO (BEFORE SUMMARY) ----
     if step == "personal_info":
@@ -654,7 +650,7 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
     if step == "preview":
         if not t or t.lower() in {"done", "skip"}:
             preview_text = _format_preview(answers)
-            return f"{preview_text}\n\nLooks good? Reply *yes* to generate your document, or */reset* to start over."
+            return f"__CONFIRM__|{preview_text}\n\nLooks good? Tap *Yes* to generate your document."
         if t.lower() in {"yes", "y", "confirm", "ok", "okay"}:
             answers["template"] = answers.get("template", "template_1")
             _advance(db, job, answers, "finalize")
@@ -674,16 +670,26 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
         limit_msg = check_and_increment(user, db)
         if limit_msg:
             return limit_msg
-        logger.info(f"[handle_resume] Showing format menu for job.id={job.id}")
-        answers["_step"] = "awaiting_format"
-        job.answers = answers
-        flag_modified(job, "answers")
-        db.commit()
-        return f"__SHOW_FORMAT_MENU__|{job.id}"
-
-    # ---- AWAITING FORMAT ----
-    if step == "awaiting_format":
-        return f"__SHOW_FORMAT_MENU__|{job.id}"
+        try:
+            logger.info(f"[handle_resume] Generating PDF for job.id={job.id}")
+            template = answers.get("template", "template_1")
+            loop = asyncio.get_event_loop()
+            pdf_bytes = await loop.run_in_executor(
+                None, pdf_renderer.render_pdf_from_data, answers, template, job.type
+            )
+            filename = _generate_filename(job)
+            job.draft_text = await storage.save_document(job.id, pdf_bytes, filename)
+            job.status = "preview_ready"
+            answers["_step"] = "done"
+            job.answers = answers
+            flag_modified(job, "answers")
+            db.commit()
+            return f"__SEND_DOCUMENT__|{job.id}|{filename}"
+        except Exception as e:
+            logger.error(f"[handle_resume] PDF generation failed: {e}")
+            job.status = "render_failed"
+            db.commit()
+            return "❌ Sorry, document generation failed. Please type /reset and try again."
 
     # ---- DONE ----
     if step == "done":
@@ -797,7 +803,7 @@ async def handle_cover(db: Session, job: Job, text: str) -> str:
         answers["company_goal"] = t
         _advance(db, job, answers, "preview")
         preview_text = _format_cover_preview(answers)
-        return f"{preview_text}\n\nLooks good? Reply *yes* to generate your cover letter, or */reset* to start over."
+        return f"__CONFIRM__|{preview_text}\n\nLooks good? Tap *Yes* to generate your cover letter."
 
     # PREVIEW
     if step == "preview":
@@ -807,11 +813,13 @@ async def handle_cover(db: Session, job: Job, text: str) -> str:
             if limit_msg:
                 return limit_msg
             try:
-                logger.info(f"[cover] Rendering cover letter for job.id={job.id}")
+                logger.info(f"[cover] Rendering cover letter PDF for job.id={job.id}")
                 loop = asyncio.get_event_loop()
-                doc_bytes = await loop.run_in_executor(None, renderer.render_cover_letter, job)
+                pdf_bytes = await loop.run_in_executor(
+                    None, pdf_renderer.render_pdf_from_data, answers, "template_1", "cover"
+                )
                 filename = _generate_filename(job)
-                job.draft_text = await storage.save_document(job.id, doc_bytes, filename)
+                job.draft_text = await storage.save_document(job.id, pdf_bytes, filename)
                 job.status = "preview_ready"
                 db.commit()
                 _advance(db, job, answers, "done")
@@ -833,7 +841,7 @@ async def handle_cover(db: Session, job: Job, text: str) -> str:
                 return ""
 
         preview_text = _format_cover_preview(answers)
-        return f"{preview_text}\n\nLooks good? Reply *yes* to generate your cover letter, or */reset* to start over."
+        return f"__CONFIRM__|{preview_text}\n\nLooks good? Tap *Yes* to generate your cover letter."
 
     return resume_flow.QUESTIONS.get(step, resume_flow.QUESTIONS["basics"])
 
@@ -955,14 +963,11 @@ async def generate_sample_document(db: Session, user_id: int, template_choice: s
 
     try:
         loop = asyncio.get_event_loop()
-        if doc_type == "cv":
-            doc_bytes = await loop.run_in_executor(None, renderer.render_cv, job)
-        elif doc_type == "cover":
-            doc_bytes = await loop.run_in_executor(None, renderer.render_cover_letter, job)
-        else:
-            doc_bytes = await loop.run_in_executor(None, renderer.render_resume, job)
+        pdf_bytes = await loop.run_in_executor(
+            None, pdf_renderer.render_pdf_from_data, sample_data, template_choice, doc_type
+        )
         filename = _generate_filename(job)
-        job.draft_text = await storage.save_document(job.id, doc_bytes, filename)
+        job.draft_text = await storage.save_document(job.id, pdf_bytes, filename)
         job.status = "completed"
         db.commit()
         logger.info(f"[generate_sample] Generated sample document: {filename}")
