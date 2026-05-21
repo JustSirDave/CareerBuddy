@@ -33,6 +33,8 @@ async def upload_document(file_bytes: bytes, filename: str, job_id: str) -> str:
             file_bytes,
             public_id=public_id,
             resource_type="raw",
+            type="upload",
+            access_mode="public",
             overwrite=True,
         ),
     )
