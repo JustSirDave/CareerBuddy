@@ -64,10 +64,9 @@ async def send_welcome_menu(chat_id: int | str, first_name: str) -> dict:
     """Send the new-user welcome message with document-type inline keyboard."""
     text = (
         f"Hey {first_name}! 👋\n\n"
-        "Welcome to CareerBuddy — I help you create professional Resumes, CVs, and Cover Letters "
-        "through a simple conversation. No forms, no uploads, no stress.\n\n"
-        "🎁 Your first Resume/CV and Cover Letter are on us — completely free.\n\n"
-        "What are you working on today?"
+        "Welcome to CareerBuddy — your free AI assistant for creating professional "
+        "Resumes, CVs, and Cover Letters through a simple conversation.\n\n"
+        "Everything is completely free. What are you working on today?"
     )
     keyboard = {
         "inline_keyboard": [
@@ -76,8 +75,7 @@ async def send_welcome_menu(chat_id: int | str, first_name: str) -> dict:
                 {"text": "✉️ Write a Cover Letter", "callback_data": "doc_cover"},
             ],
             [
-                {"text": "✨ Revamp my existing CV", "callback_data": "doc_revamp"},
-                {"text": "📋 See the menu", "callback_data": "learn_more"},
+                {"text": "✨ Revamp my existing doc", "callback_data": "doc_revamp"},
             ],
         ]
     }
@@ -96,7 +94,7 @@ async def send_welcome_menu(chat_id: int | str, first_name: str) -> dict:
 
 async def send_choice_menu(chat_id: int | str):
     """
-    Send initial welcome message with inline keyboard for plan selection.
+    Send initial welcome message with inline keyboard.
 
     Args:
         chat_id: Telegram chat ID
@@ -104,40 +102,22 @@ async def send_choice_menu(chat_id: int | str):
     Returns:
         Response JSON from Telegram API
     """
-    welcome_msg = """👋 *Welcome to Career Buddy!*
-
-Your personal AI assistant for creating professional resumes, CVs, and cover letters tailored to your dream role.
-
-*🎯 What I offer:*
-
-*🆓 Free Plan*
-• 2 free documents (Resume or CV)
-• AI-powered generation
-• Professional summaries
-• Smart skill suggestions
-
-*💳 Pay-Per-Generation*
-• ₦7,500 per document
-• Enhanced AI features
-• Business impact analysis
-• Priority support
-
-_Need help? Use /help command_"""
+    welcome_msg = (
+        "👋 *Welcome to CareerBuddy!*\n\n"
+        "Your free AI assistant for creating professional resumes, CVs, and cover letters.\n\n"
+        "*🎯 What I can do:*\n"
+        "• Build your Resume or CV from scratch\n"
+        "• Write a tailored Cover Letter\n"
+        "• Revamp your existing document\n\n"
+        "Everything is completely free. No plans, no payments.\n\n"
+        "Ready? Let's build something great. 👇"
+    )
 
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
-    
-    # Inline keyboard with buttons
+
     keyboard = {
         "inline_keyboard": [
-            [
-                {"text": "🆓 Start with Free Plan", "callback_data": "plan_free"}
-            ],
-            [
-                {"text": "⭐ Start with Premium Plan", "callback_data": "plan_premium"}
-            ],
-            [
-                {"text": "💡 Learn More", "callback_data": "learn_more"}
-            ]
+            [{"text": "🚀 Get Started", "callback_data": "plan_free"}]
         ]
     }
     

@@ -1139,11 +1139,6 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
             "📦 Source code:\n"
             "github.com/your-username/careerbuddy\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "🙏 *Support the Project*\n"
-            "CareerBuddy is free for everyone. If it's been useful to you, "
-            "consider buying us a coffee to keep the servers running:\n"
-            "https://ko-fi.com/careerbuddy\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
             "Type /start to create your next document!"
         )
 
@@ -1152,12 +1147,10 @@ async def handle_inbound(db: Session, telegram_user_id: str, text: str, msg_id: 
         logger.info(f"[handle_inbound] Processing /status for user {telegram_user_id}")
         display_name = _esc(user.name or user.telegram_username or "User")
         doc_count = getattr(user, "monthly_doc_count", 0) or 0
-        from app.config import settings as app_settings
-        limit = app_settings.monthly_doc_limit
         status_msg = (
             "📊 *Your Account*\n\n"
             f"👤 {display_name}\n\n"
-            f"📄 Documents this month: {doc_count} / {limit}\n\n"
+            f"📄 Documents created this month: {doc_count}\n\n"
             "Ready to create? Type /start!"
         )
         return status_msg

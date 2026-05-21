@@ -205,31 +205,23 @@ def detect_sections(content: str) -> Dict[str, str]:
 
 def validate_file_format(file_name: str, mime_type: str, user_tier: str = "free") -> tuple[bool, str, str]:
     """
-    Validate uploaded file format based on user tier.
-    
+    Validate uploaded file format.
+
     Args:
         file_name: Name of uploaded file
         mime_type: MIME type from Telegram
-        user_tier: User's tier (free or pro)
-        
+        user_tier: Unused — kept for call-site compatibility
+
     Returns:
         Tuple of (is_valid, file_type, error_message)
     """
     file_extension = Path(file_name).suffix.lower()
-    
-    # DOCX format - supported for all tiers
+
     if mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or file_extension == ".docx":
         return (True, "docx", "")
-    
-    # PDF format - only for premium users
+
     if mime_type == "application/pdf" or file_extension == ".pdf":
-        if user_tier == "pro":
-            return (True, "pdf", "")
-        else:
-            return (False, "", "📄 *PDF uploads are a Premium feature*\n\n"
-                              "Free tier supports: ✅ DOCX files\n"
-                              "Premium tier adds: ✅ PDF files\n\n"
-                              "Please upload a .docx file, or upgrade to Premium to use PDF files!")
+        return (True, "pdf", "")
     
     # DOC format (old Word) - not supported yet
     if mime_type == "application/msword" or file_extension == ".doc":

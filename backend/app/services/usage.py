@@ -32,13 +32,9 @@ def check_and_increment(user: User, db: Session) -> str | None:
     if doc_count >= limit:
         return (
             f"📊 *Monthly limit reached*\n\n"
-            f"You've created {doc_count} document{'s' if doc_count != 1 else ''} this month "
-            f"(limit: {limit}).\n\n"
+            f"You've created {doc_count} document{'s' if doc_count != 1 else ''} this month. "
             f"Your limit resets on the 1st of next month.\n\n"
-            f"🙏 *Enjoying CareerBuddy?*\n"
-            f"If this tool has been useful, consider supporting the project on Ko-fi — "
-            f"it helps keep CareerBuddy free for everyone:\n"
-            f"https://ko-fi.com/careerbuddy"
+            f"Type /reset to start fresh when you're ready."
         )
 
     user.monthly_doc_count = doc_count + 1

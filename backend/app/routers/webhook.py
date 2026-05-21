@@ -463,7 +463,7 @@ async def handle_callback_query(callback_query: dict, db):
 
         # Handle different callback actions
         if data == "plan_free":
-            # User clicked "Start with Free Plan"
+            # User clicked "Get Started" (or tapped a doc-type shortcut)
             reply = await handle_inbound(db, str(chat_id), "free", telegram_username=username)
             if reply and reply.startswith("__SHOW_DOCUMENT_MENU__|"):
                 parts = reply.split("|")
@@ -482,16 +482,8 @@ async def handle_callback_query(callback_query: dict, db):
                 await reply_text(chat_id, reply)
 
         elif data == "plan_premium":
-            # User clicked "Start with Premium Plan"
-            reply = await handle_inbound(db, str(chat_id), "/upgrade", telegram_username=username)
-            if reply and reply.startswith("__"):
-                await reply_text(
-                    chat_id,
-                    "⏳ Still working on that... or something may have gone wrong.\n\n"
-                    "Type /reset to start fresh or /help to see options.",
-                )
-            elif reply:
-                await reply_text(chat_id, reply)
+            # Legacy callback from old "Start with Premium Plan" button — treat same as get-started
+            await send_document_type_menu(chat_id, "free")
 
         elif data == "onboarding_continue":
             first_name = (from_user.get("first_name") or "").strip() or "there"
@@ -515,31 +507,23 @@ async def handle_callback_query(callback_query: dict, db):
             await send_document_type_menu(chat_id, "free")
 
         elif data == "learn_more":
-            # Show more info about the service
-            info_msg = """📚 *About Career Buddy*
-
-I'm an AI-powered assistant that helps you create professional career documents that stand out!
-
-*🎯 What I create:*
-• Professional Resumes (1-2 pages)
-• Detailed CVs
-• Professional Cover Letters
-• Revamped/improved existing documents
-
-*✨ Features:*
-• AI-enhanced content
-• ATS-friendly formatting
-• Professional summaries
-• Smart skill suggestions
-• Instant delivery
-
-*💰 Pricing:*
-• First document free!
-• Resume/CV: ₦7,500
-• Cover letter: ₦3,000
-• Bundle: ₦15,000 (2 docs + 1 cover letter)
-
-Ready to create? Type /start!"""
+            info_msg = (
+                "📚 *About CareerBuddy*\n\n"
+                "I'm a free, open-source AI assistant that helps you create "
+                "professional career documents through a simple conversation.\n\n"
+                "*🎯 What I create:*\n"
+                "• Professional Resumes (1-2 pages)\n"
+                "• Detailed CVs\n"
+                "• Professional Cover Letters\n"
+                "• Revamped/improved existing documents\n\n"
+                "*✨ Features:*\n"
+                "• AI-enhanced content\n"
+                "• ATS-friendly formatting\n"
+                "• Professional summaries\n"
+                "• Smart skill suggestions\n"
+                "• Instant delivery\n\n"
+                "Everything is completely free. Ready to create? Type /start!"
+            )
             await reply_text(chat_id, info_msg)
 
         elif data.startswith("doc_"):
@@ -615,11 +599,7 @@ Ready to create? Type /start!"""
                 db.commit()
             await reply_text(
                 chat_id,
-                "🎉 So glad it helped!\n\n"
-                "If CareerBuddy made your job search a little easier, consider buying us a coffee ☕ "
-                "— it keeps the service free for everyone:\n\n"
-                "https://ko-fi.com/careerbuddy\n\n"
-                "Good luck out there! 🚀",
+                "🎉 So glad it helped! Good luck with your job search! 🚀",
             )
 
         elif data == "feedback_bad":
