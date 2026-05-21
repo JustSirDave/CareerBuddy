@@ -406,9 +406,9 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
         exps.append(header)
         answers["experiences"] = exps
         _advance(db, job, answers, "experience_bullets")
-        return ("Great! Now send 2–4 bullet points (one per message) describing your achievements.\n\n"
-                "Example: • Increased sales by 40% through strategic marketing campaigns\n\n"
-                "Type *done* when finished.")
+        return ("__STEP_DONE__|"
+                "Great! Now send 2–4 bullet points (one per message) describing your achievements.\n\n"
+                "Example: • Increased sales by 40% through strategic marketing campaigns")
 
     # ---- EXPERIENCE BULLETS ----
     if step == "experience_bullets":
@@ -423,7 +423,7 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
             if not is_valid:
                 return ERROR_MESSAGES.get(error_key, "Add at least 2 achievement bullets for this role.")
             _advance(db, job, answers, "add_another_experience")
-            return "Add another experience? (Reply: yes / no)"
+            return "__ADD_ANOTHER__|Add another work experience?"
         if t:
             exps[-1]["bullets"].append(t.strip())
             answers["experiences"] = exps
@@ -431,7 +431,7 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
             flag_modified(job, "answers")
             db.commit()
         bullet_count = len(exps[-1].get("bullets", []))
-        return f"Got it! ({bullet_count} bullet{'s' if bullet_count != 1 else ''} added)\n\nSend another bullet point or type *done* to continue."
+        return f"__STEP_DONE__|Got it! ({bullet_count} bullet{'s' if bullet_count != 1 else ''} added)\n\nSend another bullet point."
 
     # ---- ADD ANOTHER EXPERIENCE ----
     if step == "add_another_experience":
@@ -463,7 +463,7 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
         job.answers = answers
         flag_modified(job, "answers")
         db.commit()
-        return "✅ Added. Send another or type *done* to continue."
+        return "__STEP_DONE__|✅ Added. Send another entry, or click Done."
 
     # ---- CERTIFICATIONS ----
     if step == "certifications":
@@ -478,7 +478,7 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
         job.answers = answers
         flag_modified(job, "answers")
         db.commit()
-        return "✅ Added. Send another certification or type *done* to continue."
+        return "__STEP_DONE__|✅ Added. Send another certification, or click Done."
 
     # ---- PROFILES ----
     if step == "profiles":
@@ -500,7 +500,7 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
         job.answers = answers
         flag_modified(job, "answers")
         db.commit()
-        return "✅ Added. Send another profile or type *done* to continue."
+        return "__STEP_DONE__|✅ Added. Send another profile, or click Done."
 
     # ---- PROJECTS ----
     if step == "projects":
@@ -516,7 +516,7 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
             job.answers = answers
             flag_modified(job, "answers")
             db.commit()
-            return "✅ Added. Send another project or type *done* to continue."
+            return "__STEP_DONE__|✅ Added. Send another project, or click Done."
 
     # ---- SKILLS (AI-GENERATED WITH NUMBER SELECTION) ----
     if step == "skills":
@@ -525,10 +525,11 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
 
         if not ai_skills:
             if t_lower in SKILLS_WAKE_WORDS:
-                return ("⏳ *Generating skill suggestions...*\n\n"
+                return ("__STEP_CONTINUE_SKIP__|"
+                        "⏳ *Generating skill suggestions...*\n\n"
                         "AI is analyzing your role and experience to suggest relevant skills.\n"
-                        "This usually takes 3-5 seconds.\n\n"
-                        "Type *continue* when ready to see them!")
+                        "This usually takes 3–5 seconds.\n\n"
+                        "Click Continue when ready.")
             try:
                 target_role = answers.get("target_role", "")
                 experiences = answers.get("experiences", [])
@@ -603,8 +604,9 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
                 preview_text = _format_preview(answers)
                 return f"__CONFIRM__|{preview_text}\n\nLooks good? Tap *Yes* to generate your document."
 
-            return ("⏳ *Ready to generate your AI summary!*\n\n"
-                    "Type *continue* to start AI generation, or *skip* to write your own.")
+            return ("__STEP_CONTINUE_SKIP__|"
+                    "⏳ *Ready to generate your AI summary!*\n\n"
+                    "Click Continue to start AI generation, or Skip to write your own.")
 
         if t_lower in WAKE_WORDS and t_lower not in {"yes", "y", "ok", "okay", "good", "done"}:
             return (f"__CONFIRM__|✨ *Your AI-Generated Professional Summary:*\n\n"
@@ -639,16 +641,15 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
             flag_modified(job, "answers")
             db.commit()
         _advance(db, job, answers, "summary")
-        return ("🤖 *AI Summary Generation Ready*\n\n"
+        return ("__STEP_CONTINUE_SKIP__|"
+                "🤖 *AI Summary Generation Ready*\n\n"
                 "I'm about to craft your professional summary using AI based on:\n"
                 "• Your target role\n"
                 "• Your work experience\n"
                 "• Your skills\n"
                 "• Your personal info\n\n"
-                "⏱️ *This will take approximately 30-60 seconds*\n\n"
-                "📝 *What to do:*\n"
-                "Type *continue* when you're ready for me to generate it!\n\n"
-                "💡 Or you can type *skip* to write your own summary.")
+                "⏱️ This will take approximately 30–60 seconds.\n\n"
+                "Click Continue when ready, or Skip to write your own.")
 
     # ---- PREVIEW ----
     if step == "preview":
@@ -779,9 +780,9 @@ async def handle_cover(db: Session, job: Job, text: str) -> str:
             return "Please share a key achievement with quantified results."
         answers["achievement_1"] = t
         _advance(db, job, answers, "achievement_2")
-        return ("Share another key achievement (optional).\n\n"
-                "Example: Partnered with leadership on workforce planning during company expansion, delivering 40% cost savings\n\n"
-                "Or type *skip* to continue")
+        return ("__STEP_DONE_SKIP__|"
+                "Share another key achievement (optional).\n\n"
+                "Example: Partnered with leadership on workforce planning during company expansion, delivering 40% cost savings")
 
     # ACHIEVEMENT 2
     if step == "achievement_2":

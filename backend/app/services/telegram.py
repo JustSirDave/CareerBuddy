@@ -392,6 +392,57 @@ async def send_document_url(chat_id: int | str, doc_url: str, filename: str, cap
     return {"error": str(last_error)}
 
 
+async def _send_with_buttons(chat_id: int | str, text: str, buttons: list) -> dict:
+    """Send a Telegram message with an inline keyboard."""
+    api_url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "Markdown",
+        "reply_markup": {"inline_keyboard": buttons},
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(api_url, json=payload)
+        if r.status_code >= 400:
+            logger.error(f"[telegram] _send_with_buttons failed: {r.status_code} {r.text}")
+        return r.json() if r.content else {}
+    except Exception as e:
+        logger.error(f"[telegram] _send_with_buttons exception: {e}")
+        return {"error": str(e)}
+
+
+async def send_step_done_prompt(chat_id: int | str, text: str) -> dict:
+    """Send message with [✅ Done] button."""
+    return await _send_with_buttons(
+        chat_id, text, [[{"text": "✅ Done", "callback_data": "step_done"}]]
+    )
+
+
+async def send_step_done_skip_prompt(chat_id: int | str, text: str) -> dict:
+    """Send message with [✅ Done] [⏭️ Skip] buttons."""
+    return await _send_with_buttons(chat_id, text, [[
+        {"text": "✅ Done", "callback_data": "step_done"},
+        {"text": "⏭️ Skip", "callback_data": "step_skip"},
+    ]])
+
+
+async def send_step_continue_skip_prompt(chat_id: int | str, text: str) -> dict:
+    """Send message with [➡️ Continue] [⏭️ Skip] buttons."""
+    return await _send_with_buttons(chat_id, text, [[
+        {"text": "➡️ Continue", "callback_data": "step_continue"},
+        {"text": "⏭️ Skip", "callback_data": "step_skip"},
+    ]])
+
+
+async def send_add_another_prompt(chat_id: int | str, text: str) -> dict:
+    """Send message with [➕ Add Another] [✅ Done Adding] buttons."""
+    return await _send_with_buttons(chat_id, text, [[
+        {"text": "➕ Add Another", "callback_data": "add_another"},
+        {"text": "✅ Done Adding", "callback_data": "step_done"},
+    ]])
+
+
 async def send_typing_action(chat_id: int | str):
     """
     Send 'typing' action to show bot is processing.

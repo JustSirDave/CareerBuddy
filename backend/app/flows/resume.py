@@ -24,21 +24,22 @@ QUESTIONS = {
         "• Marketing Manager"
     ),
     "experiences": (
+        "__STEP_DONE__|"
         "💼 *Step 3: Work Experience*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "Let's add your work experience.\n\n"
         "*Format:* Role, Company, City, Start (MMM YYYY), End (MMM YYYY or Present)\n\n"
-        "*Example:* Backend Engineer, TechCorp, Lagos, Jan 2020, Present\n\n"
-        "Type *done* when you've added all experiences."
+        "*Example:* Backend Engineer, TechCorp, Lagos, Jan 2020, Present"
     ),
     "experience_bullets": (
+        "__STEP_DONE__|"
         "📌 *Achievement Bullets*\n\n"
         "Send 2–4 bullet points describing your *achievements* for this role.\n"
         "Focus on quantifiable results!\n\n"
         "*Examples:*\n"
         "• Increased sales by 40% through strategic marketing campaigns\n"
         "• Led team of 5 to deliver project 2 weeks ahead of schedule\n\n"
-        "Send one bullet per message, or type *done* when finished."
+        "Send one bullet per message."
     ),
     "skills": (
         "💡 *Step 4: Skills*\n"
@@ -47,13 +48,15 @@ QUESTIONS = {
         "Please wait a moment..."
     ),
     "education": (
+        "__STEP_DONE__|"
         "🎓 *Step 5: Education*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "*Format:* Degree, School, Year\n\n"
         "*Example:* B.Sc. Computer Science, University of Lagos, 2020\n\n"
-        "You can add multiple—send one per message, or type *done* when finished."
+        "You can add multiple — send one per message."
     ),
     "certifications": (
+        "__STEP_DONE_SKIP__|"
         "🎖️ *Certifications*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "Do you have any professional certifications or courses?\n\n"
@@ -62,9 +65,10 @@ QUESTIONS = {
         "• Google Data Analytics Professional Certificate\n"
         "• PMP Certification\n"
         "• Certified Scrum Master\n\n"
-        "Send one per message, or type *done* or *skip* to continue."
+        "Send one per message."
     ),
     "profiles": (
+        "__STEP_DONE_SKIP__|"
         "🔗 *Profile Links*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "Add your professional profile links (optional).\n\n"
@@ -73,9 +77,10 @@ QUESTIONS = {
         "• LinkedIn, https://linkedin.com/in/yourname\n"
         "• GitHub, https://github.com/yourname\n"
         "• Portfolio, https://yourportfolio.com\n\n"
-        "Send one per message, or type *done* or *skip* to finish."
+        "Send one per message."
     ),
     "projects": (
+        "__STEP_DONE_SKIP__|"
         "🚀 *Projects*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "Any notable projects or volunteer work?\n\n"
@@ -83,9 +88,10 @@ QUESTIONS = {
         "• Built an e-commerce platform using React and Node.js\n"
         "• Developed a machine learning model for customer churn prediction\n"
         "• Volunteer coding instructor at local community center\n\n"
-        "Send one per message, or type *done* or *skip* to finish."
+        "Send one per message."
     ),
     "personal_info": (
+        "__STEP_DONE_SKIP__|"
         "🌟 *Tell Me About Yourself*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "Share a bit about yourself to help AI generate your professional summary!\n\n"
@@ -93,8 +99,7 @@ QUESTIONS = {
         "• Your personality and work style\n"
         "• Key experiences or achievements\n"
         "• What makes you unique\n\n"
-        "*Example:* Detail-oriented Data Analyst with 5+ years of experience. I love solving complex problems and have helped companies increase revenue by 40%. I work well in teams and specialize in Python and SQL.\n\n"
-        "Or type *skip* to let AI generate summary from your profile alone."
+        "*Example:* Detail-oriented Data Analyst with 5+ years of experience. I love solving complex problems and have helped companies increase revenue by 40%. I work well in teams and specialize in Python and SQL."
     ),
     "summary": (
         "📝 *Step 9: Professional Summary*\n"

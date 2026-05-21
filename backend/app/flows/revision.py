@@ -30,10 +30,10 @@ SECTION_PROMPTS = {
         "*Full Name, email@example.com, 08012345678, City*"
     ),
     "experiences": (
+        "__STEP_DONE__|"
         "Let's update your work experience.\n\n"
         "Tell me about your most recent role:\n"
-        "*Role title, Company, City, Start – End date*\n\n"
-        "Type *done* when you've added all roles."
+        "*Role title, Company, City, Start – End date*"
     ),
     "skills": (
         "Let's update your skills.\n\n"
@@ -41,22 +41,25 @@ SECTION_PROMPTS = {
         "*Example:* Python, SQL, Communication"
     ),
     "summary": (
+        "__STEP_DONE_SKIP__|"
         "Let's update your professional summary.\n\n"
-        "Write your summary below, or type *skip* to keep the current one."
+        "Write your summary below, or click Skip to keep the current one."
     ),
     "education": (
+        "__STEP_DONE__|"
         "Let's update your education.\n\n"
         "Format: *Degree, Institution, Year*\n"
-        "(e.g. B.Sc Computer Science, University of Lagos, 2019)\n\n"
-        "Type *done* when finished."
+        "(e.g. B.Sc Computer Science, University of Lagos, 2019)"
     ),
     "certifications": (
+        "__STEP_DONE_SKIP__|"
         "List your updated certifications.\n"
-        "(e.g. AWS Certified Developer, 2023)\n\nType *skip* if none."
+        "(e.g. AWS Certified Developer, 2023)"
     ),
     "projects": (
+        "__STEP_DONE_SKIP__|"
         "Share your updated projects and profile links.\n"
-        "(e.g. LinkedIn: linkedin.com/in/yourname)\n\nType *skip* if none."
+        "(e.g. LinkedIn: linkedin.com/in/yourname)"
     ),
 }
 
@@ -171,7 +174,7 @@ def _handle_section_collection(db: Session, job: Job, section_key: str, message_
         job.revision_answers = rev_answers
         flag_modified(job, "revision_answers")
         db.commit()
-        return "Got it! Add another role, or type *done* to continue."
+        return "__STEP_DONE__|Got it! Add another role, or click Done when finished."
 
     if section_key == "basics":
         if "," not in message_text:
@@ -211,7 +214,7 @@ def _handle_section_collection(db: Session, job: Job, section_key: str, message_
     db.commit()
 
     if section_key in ("education",):
-        return "✅ Added. Send another or type *done* to continue."
+        return "__STEP_DONE__|✅ Added. Send another entry, or click Done."
     return _show_revision_confirmation(db, job, section_key)
 
 

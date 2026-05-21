@@ -16,10 +16,66 @@ from app.services.idempotency import seen_or_mark
 from app.db import get_db
 from app.models.user import User
 from app.models.job import Job
-from app.services.telegram import reply_text, send_choice_menu, send_welcome_menu, send_document, send_document_type_menu, send_typing_action, send_template_selection, send_onboarding_continue_menu, send_feedback_prompt, forward_bad_feedback, send_confirm_menu, send_revision_confirm_menu
+from app.services.telegram import (
+    reply_text, send_choice_menu, send_welcome_menu, send_document,
+    send_document_type_menu, send_typing_action, send_template_selection,
+    send_onboarding_continue_menu, send_feedback_prompt, forward_bad_feedback,
+    send_confirm_menu, send_revision_confirm_menu,
+    send_step_done_prompt, send_step_done_skip_prompt,
+    send_step_continue_skip_prompt, send_add_another_prompt,
+    send_document_url,
+)
 from app.services.conversation_router import handle_inbound
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+
+
+async def _route_reply(chat_id: int | str, reply: str | None, db) -> None:
+    """Central router for every signal string returned by handle_inbound."""
+    if not reply:
+        return
+    if reply == "__SHOW_MENU__":
+        await send_choice_menu(chat_id)
+    elif reply.startswith("__STEP_DONE__|"):
+        await send_step_done_prompt(chat_id, reply[len("__STEP_DONE__|"):])
+    elif reply.startswith("__STEP_DONE_SKIP__|"):
+        await send_step_done_skip_prompt(chat_id, reply[len("__STEP_DONE_SKIP__|"):])
+    elif reply.startswith("__STEP_CONTINUE_SKIP__|"):
+        await send_step_continue_skip_prompt(chat_id, reply[len("__STEP_CONTINUE_SKIP__|"):])
+    elif reply.startswith("__ADD_ANOTHER__|"):
+        await send_add_another_prompt(chat_id, reply[len("__ADD_ANOTHER__|"):])
+    elif reply.startswith("__SEND_WELCOME__|"):
+        await send_welcome_menu(chat_id, reply.split("|", 1)[1])
+    elif reply.startswith("__SHOW_ONBOARDING_CONTINUE_MENU__|"):
+        parts = reply.split("|", 1)
+        if len(parts) == 2:
+            await send_onboarding_continue_menu(chat_id, parts[1])
+    elif reply.startswith("__SHOW_DOCUMENT_MENU__|"):
+        parts = reply.split("|", 2)
+        if len(parts) >= 2:
+            if len(parts) == 3:
+                await reply_text(chat_id, parts[2])
+            await send_document_type_menu(chat_id, parts[1])
+    elif reply.startswith("__SEND_DOCUMENT__|"):
+        parts = reply.split("|")
+        if len(parts) == 3:
+            await send_document_to_user(chat_id, parts[1], parts[2], db)
+    elif reply.startswith("__SEND_PDF__|"):
+        parts = reply.split("|")
+        if len(parts) >= 2:
+            await send_pdf_to_user(chat_id, parts[1], db)
+    elif reply.startswith("__CONFIRM_REVISION__|"):
+        await send_revision_confirm_menu(chat_id, reply[len("__CONFIRM_REVISION__|"):])
+    elif reply.startswith("__CONFIRM__|"):
+        await send_confirm_menu(chat_id, reply[len("__CONFIRM__|"):])
+    elif reply.startswith("__"):
+        await reply_text(
+            chat_id,
+            "⏳ Still working on that... or something may have gone wrong.\n\n"
+            "Type /reset to start fresh or /help to see options.",
+        )
+    else:
+        await reply_text(chat_id, reply)
 
 
 def verify_telegram_webhook_secret(request: Request) -> None:
@@ -96,48 +152,7 @@ async def _process_telegram_update(payload: dict, db):
     await send_typing_action(chat_id)
     reply = await handle_inbound(db, str(chat_id), text or "", msg_id=str(msg_id), telegram_username=username, first_name=first_name)
 
-    if reply == "__SHOW_MENU__":
-        await send_choice_menu(chat_id)
-        return
-    if reply and reply.startswith("__SEND_WELCOME__|"):
-        first_name_part = reply.split("|", 1)[1]
-        await send_welcome_menu(chat_id, first_name_part)
-        return
-    if reply and reply.startswith("__SHOW_ONBOARDING_CONTINUE_MENU__|"):
-        parts = reply.split("|", 1)
-        if len(parts) == 2:
-            await send_onboarding_continue_menu(chat_id, parts[1])
-        return
-    if reply and reply.startswith("__SHOW_DOCUMENT_MENU__|"):
-        parts = reply.split("|", 2)
-        if len(parts) >= 2:
-            tier = parts[1]
-            if len(parts) == 3:
-                await reply_text(chat_id, parts[2])
-            await send_document_type_menu(chat_id, tier)
-        return
-    if reply and reply.startswith("__SEND_DOCUMENT__|"):
-        parts = reply.split("|")
-        if len(parts) == 3:
-            _, job_id, filename = parts
-            await send_document_to_user(chat_id, job_id, filename, db)
-        return
-    if reply and reply.startswith("__SEND_PDF__|"):
-        parts = reply.split("|")
-        if len(parts) >= 2:
-            user_id = parts[1]
-            await send_pdf_to_user(chat_id, user_id, db)
-        return
-    if reply and reply.startswith("__CONFIRM_REVISION__|"):
-        question = reply[len("__CONFIRM_REVISION__|"):]
-        await send_revision_confirm_menu(chat_id, question)
-        return
-    if reply and reply.startswith("__CONFIRM__|"):
-        question = reply[len("__CONFIRM__|"):]
-        await send_confirm_menu(chat_id, question)
-        return
-    if reply:
-        await reply_text(chat_id, reply)
+    await _route_reply(chat_id, reply, db)
 
 
 async def handle_document_upload(chat_id: int | str, document: dict, db: Session, username: str | None = None):
@@ -650,6 +665,16 @@ async def handle_callback_query(callback_query: dict, db):
         elif data == "feedback_skip":
             pass  # end silently — callback query already answered above
 
+        elif data in ("step_done", "step_continue", "step_skip", "add_another"):
+            step_text_map = {
+                "step_done": "done",
+                "step_continue": "continue",
+                "step_skip": "skip",
+                "add_another": "yes",
+            }
+            reply = await handle_inbound(db, str(chat_id), step_text_map[data], telegram_username=username)
+            await _route_reply(chat_id, reply, db)
+
         elif data == "cancel":
             await reply_text(chat_id, "❌ *Cancelled*\n\nNo problem! Type /start when you're ready to create a document.")
 
@@ -743,30 +768,7 @@ async def handle_callback_query(callback_query: dict, db):
                         return {"ok": True}
 
             reply = await handle_inbound(db, str(chat_id), text_map[data], telegram_username=username)
-            if reply == "__SHOW_MENU__":
-                await send_choice_menu(chat_id)
-            elif reply and reply.startswith("__CONFIRM_REVISION__|"):
-                await send_revision_confirm_menu(chat_id, reply[len("__CONFIRM_REVISION__|"):])
-            elif reply and reply.startswith("__CONFIRM__|"):
-                await send_confirm_menu(chat_id, reply[len("__CONFIRM__|"):])
-            elif reply and reply.startswith("__SEND_DOCUMENT__|"):
-                parts = reply.split("|")
-                if len(parts) == 3:
-                    await send_document_to_user(chat_id, parts[1], parts[2], db)
-            elif reply and reply.startswith("__SHOW_DOCUMENT_MENU__|"):
-                parts = reply.split("|", 2)
-                if len(parts) >= 2:
-                    if len(parts) == 3:
-                        await reply_text(chat_id, parts[2])
-                    await send_document_type_menu(chat_id, parts[1])
-            elif reply and reply.startswith("__"):
-                await reply_text(
-                    chat_id,
-                    "⏳ Still working on that... or something may have gone wrong.\n\n"
-                    "Type /reset to start fresh or /help to see options.",
-                )
-            elif reply:
-                await reply_text(chat_id, reply)
+            await _route_reply(chat_id, reply, db)
 
         return {"ok": True}
 
