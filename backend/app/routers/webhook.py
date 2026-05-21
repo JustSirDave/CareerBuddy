@@ -681,19 +681,20 @@ Ready to create? Type /start!"""
                             f"[retry] job_id={failed_job.id} step after reset: "
                             f"{failed_job.answers.get('_step')!r}"
                         )
-                        await reply_text(chat_id, "🔄 Regenerating your document, please wait...")
                         await send_typing_action(chat_id)
+                        await reply_text(chat_id, "🔄 Regenerating your document, please wait...")
                         if failed_job.type in {"resume", "cv"}:
                             gen_reply = await handle_resume(db, failed_job, "yes")
                         elif failed_job.type == "cover":
                             gen_reply = await handle_cover(db, failed_job, "yes")
                         else:
                             gen_reply = ""
+                        db.refresh(failed_job)
                         if gen_reply and gen_reply.startswith("__SEND_DOCUMENT__|"):
                             parts = gen_reply.split("|")
                             if len(parts) == 3:
                                 await send_document_to_user(chat_id, parts[1], parts[2], db)
-                        elif not gen_reply or gen_reply.startswith("__"):
+                        elif not gen_reply or gen_reply.startswith("__") or failed_job.status == "render_failed":
                             logger.error(f"[callback_query] Repeated render_failed for chat_id={chat_id} job_id={failed_job.id}")
                             await reply_text(
                                 chat_id,
