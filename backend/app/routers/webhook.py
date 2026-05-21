@@ -657,9 +657,33 @@ Ready to create? Type /start!"""
                         .first()
                     )
                     if failed_job:
+                        from sqlalchemy.orm.attributes import flag_modified
+                        from app.services.conversation_router import handle_resume, handle_cover
+                        answers = failed_job.answers if isinstance(failed_job.answers, dict) else {}
+                        current_step = answers.get("_step")
+                        finalize_step = "finalize" if failed_job.type in {"resume", "cv"} else "preview"
+                        logger.info(
+                            f"[retry] job_id={failed_job.id} type={failed_job.type!r} "
+                            f"current_step={current_step!r} -> setting to {finalize_step!r}"
+                        )
+                        answers["_step"] = finalize_step
+                        failed_job.answers = answers
+                        failed_job.status = "collecting"
+                        flag_modified(failed_job, "answers")
+                        db.commit()
+                        db.refresh(failed_job)
+                        logger.info(
+                            f"[retry] job_id={failed_job.id} step after reset: "
+                            f"{failed_job.answers.get('_step')!r}"
+                        )
                         await reply_text(chat_id, "🔄 Regenerating your document, please wait...")
                         await send_typing_action(chat_id)
-                        gen_reply = await handle_inbound(db, str(chat_id), "retry", telegram_username=username)
+                        if failed_job.type in {"resume", "cv"}:
+                            gen_reply = await handle_resume(db, failed_job, "yes")
+                        elif failed_job.type == "cover":
+                            gen_reply = await handle_cover(db, failed_job, "yes")
+                        else:
+                            gen_reply = ""
                         if gen_reply and gen_reply.startswith("__SEND_DOCUMENT__|"):
                             parts = gen_reply.split("|")
                             if len(parts) == 3:
