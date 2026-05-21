@@ -257,9 +257,11 @@ async def handle_revamp_upload(chat_id: int | str, file_path: Path, file_type: s
 async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, db=None):
     """
     Send the generated document to the user via Telegram.
-    Passes the public Cloudinary URL directly to Telegram — no local download.
+    Tries URL-based delivery first; falls back to downloading bytes and sending multipart.
     """
     try:
+        import httpx
+        from app.services.telegram import send_document as send_document_bytes
         from app.services.telegram import send_document_url
 
         job = db.query(Job).filter(Job.id == job_id).first() if db else None
@@ -275,27 +277,46 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
             return
 
         filename = doc_url.split("/")[-1] or filename
+        success_msg = (
+            "✅ *Your document is ready!*\n\n"
+            "📄 Your PDF is ready to send to recruiters and upload to job boards.\n\n"
+            "🔄 Type /reset to create another document.\n\n"
+            "Good luck with your job search! 🚀"
+        )
+
+        # Attempt 1: let Telegram fetch directly from Cloudinary URL
         logger.info(f"[telegram_webhook] Sending document by URL for job {job_id}: {filename}")
         send_resp = await send_document_url(chat_id, doc_url, filename, caption="📄 *Your Document is Ready!*")
-
         if send_resp and not send_resp.get("error"):
-            logger.info(f"[telegram_webhook] Document sent to {chat_id}: {filename}")
+            logger.info(f"[telegram_webhook] Document sent by URL to {chat_id}: {filename}")
             if db and job:
                 from datetime import datetime
                 job.status = "done"
                 job.completed_at = datetime.utcnow()
                 db.commit()
-            success_msg = (
-                "✅ *Your document is ready!*\n\n"
-                "📄 Your PDF is ready to send to recruiters and upload to job boards.\n\n"
-                "🔄 Type /reset to create another document.\n\n"
-                "Good luck with your job search! 🚀"
-            )
             await reply_text(chat_id, success_msg)
             await send_feedback_prompt(chat_id)
             return
 
-        logger.error(f"[telegram_webhook] send_document_url failed for job {job_id}: {send_resp}")
+        # Attempt 2: download bytes server-side, send as multipart
+        logger.warning(f"[telegram_webhook] URL send failed ({send_resp}), falling back to bytes for job {job_id}")
+        async with httpx.AsyncClient(timeout=60) as client:
+            dl = await client.get(doc_url)
+            dl.raise_for_status()
+            file_bytes = dl.content
+        send_resp = await send_document_bytes(chat_id, file_bytes, filename, caption="📄 *Your Document is Ready!*")
+        if send_resp and not send_resp.get("error"):
+            logger.info(f"[telegram_webhook] Document sent by bytes to {chat_id}: {filename}")
+            if db and job:
+                from datetime import datetime
+                job.status = "done"
+                job.completed_at = datetime.utcnow()
+                db.commit()
+            await reply_text(chat_id, success_msg)
+            await send_feedback_prompt(chat_id)
+            return
+
+        logger.error(f"[telegram_webhook] Both delivery methods failed for job {job_id}: {send_resp}")
         await reply_text(chat_id, "❌ Sorry, something went wrong delivering your document. Please try again.")
 
     except Exception as e:

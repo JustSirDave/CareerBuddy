@@ -28,18 +28,23 @@ async def upload_document(file_bytes: bytes, filename: str, job_id: str) -> str:
     _configure()
     public_id = f"careerbuddy/jobs/{job_id}/{filename}"
     loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(
+    await loop.run_in_executor(
         None,
         lambda: cloudinary.uploader.upload(
             file_bytes,
             public_id=public_id,
-            resource_type="raw",
-            type="upload",
+            resource_type="auto",
             access_mode="public",
+            format="pdf",
             overwrite=True,
         ),
     )
-    url = result["secure_url"]
+    url, _ = cloudinary.utils.cloudinary_url(
+        public_id,
+        resource_type="auto",
+        format="pdf",
+        secure=True,
+    )
     logger.info(f"[cloud_storage] Uploaded {filename} → {url}")
     return url
 
@@ -51,7 +56,7 @@ async def delete_document(job_id: str, filename: str) -> None:
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(
         None,
-        lambda: cloudinary.uploader.destroy(public_id, resource_type="raw"),
+        lambda: cloudinary.uploader.destroy(public_id, resource_type="auto"),
     )
     logger.info(f"[cloud_storage] Deleted {public_id}")
 
