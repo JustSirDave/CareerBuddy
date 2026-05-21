@@ -242,7 +242,7 @@ async def send_to_channel(text: str) -> dict:
         pass
 
     url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage"
-    payload = {"chat_id": channel_id, "text": text, "parse_mode": "Markdown"}
+    payload = {"chat_id": channel_id, "text": text}
     logger.info(f"[feedback] Sending to channel={channel_id}: {text[:80]!r}")
     try:
         async with httpx.AsyncClient(timeout=20) as client:
