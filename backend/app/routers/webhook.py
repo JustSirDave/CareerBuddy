@@ -640,6 +640,14 @@ async def handle_callback_query(callback_query: dict, db):
                 chat_id,
                 "🎉 So glad it helped! Good luck with your job search! 🚀",
             )
+            await reply_text(
+                chat_id,
+                "💛 CareerBuddy is free and open source.\n\n"
+                "If it helped you land that job, consider supporting the project — "
+                "it keeps the bot running for everyone:\n\n"
+                "☕ https://ko-fi.com/xenaptis\n"
+                "⭐ https://github.com/xenaptis/careerbuddy",
+            )
 
         elif data == "feedback_bad":
             logger.info(f"[feedback] feedback_bad: chat_id={chat_id}")
@@ -663,7 +671,14 @@ async def handle_callback_query(callback_query: dict, db):
             await reply_text(chat_id, "😕 Sorry to hear that! What went wrong? Your feedback helps us improve.\n\n_Just type your message and send it._")
 
         elif data == "feedback_skip":
-            pass  # end silently — callback query already answered above
+            await reply_text(
+                chat_id,
+                "💛 CareerBuddy is free and open source.\n\n"
+                "If it helped you land that job, consider supporting the project — "
+                "it keeps the bot running for everyone:\n\n"
+                "☕ https://ko-fi.com/xenaptis\n"
+                "⭐ https://github.com/xenaptis/careerbuddy",
+            )
 
         elif data in ("step_done", "step_continue", "step_skip", "add_another"):
             step_text_map = {
