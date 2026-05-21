@@ -635,17 +635,27 @@ async def handle_callback_query(callback_query: dict, db):
             if data == "confirm_yes":
                 user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
                 if user:
-                    failed_job = (
+                    active_collecting = (
                         db.query(Job)
-                        .filter(
-                            Job.user_id == user.id,
-                            Job.status.in_(["render_failed", "failed", "preview_ready", "error"]),
-                        )
-                        .order_by(Job.updated_at.desc())
+                        .filter(Job.user_id == user.id, Job.status == "collecting")
                         .first()
                     )
+                    failed_job = (
+                        None
+                        if active_collecting
+                        else (
+                            db.query(Job)
+                            .filter(
+                                Job.user_id == user.id,
+                                Job.status.in_(["render_failed", "failed", "preview_ready", "error"]),
+                            )
+                            .order_by(Job.updated_at.desc())
+                            .first()
+                        )
+                    )
                     logger.info(
-                        f"[confirm_yes] stuck job found: id={failed_job.id if failed_job else None} "
+                        f"[confirm_yes] active_collecting={active_collecting.id if active_collecting else None} "
+                        f"stuck job={failed_job.id if failed_job else None} "
                         f"status={failed_job.status if failed_job else None}"
                     )
                     if failed_job:
