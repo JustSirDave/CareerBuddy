@@ -39,10 +39,10 @@ async def upload_document(file_bytes: bytes, filename: str, job_id: str) -> str:
             overwrite=True,
         ),
     )
+    # public_id already ends with .pdf — omit format= here to avoid .pdf.pdf double extension
     url, _ = cloudinary.utils.cloudinary_url(
         public_id,
         resource_type="auto",
-        format="pdf",
         secure=True,
     )
     logger.info(f"[cloud_storage] Uploaded {filename} → {url}")

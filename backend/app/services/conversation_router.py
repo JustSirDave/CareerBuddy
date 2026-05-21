@@ -11,6 +11,10 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.models import User, Job, Message
 from app.flows import resume as resume_flow
+
+# Bytes generated at render time, consumed by send_document_to_user in the same request.
+# Keyed by str(job.id). Cleared via .pop() on delivery so memory doesn't accumulate.
+_pending_pdf_bytes: dict[str, bytes] = {}
 from app.flows import onboarding as onboarding_flow
 from app.flows.validators import validate_basics, validate_experience_bullets
 from app.services.idempotency import seen_or_mark
@@ -684,6 +688,7 @@ async def handle_resume(db: Session, job: Job, text: str) -> str:
             job.answers = answers
             flag_modified(job, "answers")
             db.commit()
+            _pending_pdf_bytes[str(job.id)] = pdf_bytes
             return f"__SEND_DOCUMENT__|{job.id}|{filename}"
         except Exception as e:
             logger.error(f"[handle_resume] PDF generation failed: {e}")
@@ -823,6 +828,7 @@ async def handle_cover(db: Session, job: Job, text: str) -> str:
                 job.status = "preview_ready"
                 db.commit()
                 _advance(db, job, answers, "done")
+                _pending_pdf_bytes[str(job.id)] = pdf_bytes
                 return f"__SEND_DOCUMENT__|{job.id}|{filename}"
             except Exception as e:
                 logger.error(f"[cover] Rendering failed: {e}")
@@ -970,6 +976,7 @@ async def generate_sample_document(db: Session, user_id: int, template_choice: s
         job.draft_text = await storage.save_document(job.id, pdf_bytes, filename)
         job.status = "completed"
         db.commit()
+        _pending_pdf_bytes[str(job.id)] = pdf_bytes
         logger.info(f"[generate_sample] Generated sample document: {filename}")
         return (job.id, filename)
     except Exception as e:
