@@ -939,7 +939,7 @@ async def generate_sample_document(db: Session, user_id: int, template_choice: s
     import json
     from pathlib import Path
 
-    sample_file = Path(__file__).parent.parent.parent / "tests" / "fixtures" / "sample_resume_data.json"
+    sample_file = Path(__file__).parent.parent / "data" / "sample_resume_data.json"
     try:
         with open(sample_file, 'r', encoding='utf-8') as f:
             sample_data = json.load(f)
