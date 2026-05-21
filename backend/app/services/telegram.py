@@ -353,6 +353,45 @@ async def send_document(chat_id: int | str, file_bytes: bytes, filename: str, ca
     return {"error": str(last_error)}
 
 
+async def send_document_url(chat_id: int | str, doc_url: str, filename: str, caption: str = None) -> dict:
+    """
+    Send a document to a Telegram user by passing a public URL.
+    Telegram's servers fetch the file directly — no local download needed.
+    """
+    api_url = f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendDocument"
+    payload = {"chat_id": chat_id, "document": doc_url, "filename": filename}
+    if caption:
+        payload["caption"] = caption
+        payload["parse_mode"] = "Markdown"
+    last_error = None
+    for attempt in range(MAX_SEND_RETRIES):
+        try:
+            logger.info(f"[telegram] Sending document by URL: {filename} → {doc_url}")
+            async with httpx.AsyncClient(timeout=60) as client:
+                r = await client.post(api_url, json=payload)
+            if r.status_code == 200:
+                logger.info(f"[telegram] Document URL sent successfully to {chat_id}: {filename}")
+                return r.json() if r.content else {}
+            if r.status_code == 403:
+                logger.warning(f"Bot blocked by user {chat_id}")
+                return {"error": "blocked"}
+            if r.status_code == 429:
+                retry_after = int(r.headers.get("Retry-After", 10))
+                await asyncio.sleep(retry_after)
+                continue
+            last_error = f"{r.status_code} {r.text}"
+            logger.error(f"[telegram] send_document_url failed attempt {attempt+1}: {last_error}")
+        except (httpx.TimeoutException, httpx.NetworkError) as e:
+            last_error = e
+            delay = RETRY_BASE_DELAY * (2 ** attempt)
+            await asyncio.sleep(delay)
+        except Exception as e:
+            last_error = e
+            break
+    logger.error(f"Failed to send document URL to {chat_id} after {MAX_SEND_RETRIES} attempts: {last_error}")
+    return {"error": str(last_error)}
+
+
 async def send_typing_action(chat_id: int | str):
     """
     Send 'typing' action to show bot is processing.

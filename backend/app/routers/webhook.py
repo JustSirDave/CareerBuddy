@@ -257,11 +257,11 @@ async def handle_revamp_upload(chat_id: int | str, file_path: Path, file_type: s
 async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, db=None):
     """
     Send the generated document to the user via Telegram.
-
-    Fetches bytes from the Cloudinary URL stored in job.draft_text,
-    then sends via Telegram. Falls back to a direct Cloudinary link.
+    Passes the public Cloudinary URL directly to Telegram — no local download.
     """
     try:
+        from app.services.telegram import send_document_url
+
         job = db.query(Job).filter(Job.id == job_id).first() if db else None
         doc_url = (
             job.draft_text
@@ -274,16 +274,9 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
             await reply_text(chat_id, "❌ Sorry, your document could not be found. Please try again.")
             return
 
-        import httpx
-        from app.services.cloud_storage import get_signed_download_url
         filename = doc_url.split("/")[-1] or filename
-        signed_url = get_signed_download_url(job_id, filename)
-        logger.info(f"[telegram_webhook] Fetching via signed URL for job {job_id}")
-        async with httpx.AsyncClient(timeout=30) as client:
-            dl = await client.get(signed_url)
-            dl.raise_for_status()
-            file_bytes = dl.content
-        send_resp = await send_document(chat_id, file_bytes, filename, caption="📄 *Your Document is Ready!*")
+        logger.info(f"[telegram_webhook] Sending document by URL for job {job_id}: {filename}")
+        send_resp = await send_document_url(chat_id, doc_url, filename, caption="📄 *Your Document is Ready!*")
 
         if send_resp and not send_resp.get("error"):
             logger.info(f"[telegram_webhook] Document sent to {chat_id}: {filename}")
@@ -302,17 +295,8 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
             await send_feedback_prompt(chat_id)
             return
 
-        # Fallback: send Cloudinary URL directly
-        doc_type = filename.split("_")[0].capitalize()
-        message = (
-            f"✅ Your {doc_type} is ready!\n\n"
-            f"📄 *{filename}*\n\n"
-            f"Download here:\n{doc_url}\n\n"
-            f"Reply /reset to create another document."
-        )
-        await reply_text(chat_id, message)
-        await send_feedback_prompt(chat_id)
-        logger.info(f"[telegram_webhook] Fallback Cloudinary link sent to {chat_id}")
+        logger.error(f"[telegram_webhook] send_document_url failed for job {job_id}: {send_resp}")
+        await reply_text(chat_id, "❌ Sorry, something went wrong delivering your document. Please try again.")
 
     except Exception as e:
         logger.error(f"[telegram_webhook] Error sending document: {e}")
