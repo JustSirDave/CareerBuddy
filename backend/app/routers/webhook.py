@@ -637,13 +637,34 @@ async def handle_callback_query(callback_query: dict, db):
                 if user:
                     failed_job = (
                         db.query(Job)
-                        .filter(Job.user_id == user.id, Job.status == "render_failed")
-                        .order_by(Job.created_at.desc())
+                        .filter(
+                            Job.user_id == user.id,
+                            Job.status.in_(["render_failed", "failed", "preview_ready", "error"]),
+                        )
+                        .order_by(Job.updated_at.desc())
                         .first()
+                    )
+                    logger.info(
+                        f"[confirm_yes] stuck job found: id={failed_job.id if failed_job else None} "
+                        f"status={failed_job.status if failed_job else None}"
                     )
                     if failed_job:
                         from sqlalchemy.orm.attributes import flag_modified
                         from app.services.conversation_router import handle_resume, handle_cover
+
+                        # PDF already generated but delivery failed — re-deliver without re-generating
+                        if (
+                            failed_job.status == "preview_ready"
+                            and failed_job.draft_text
+                            and failed_job.draft_text.startswith("http")
+                        ):
+                            await send_typing_action(chat_id)
+                            await reply_text(chat_id, "🔄 Sending your document, please wait...")
+                            filename = failed_job.draft_text.split("/")[-1]
+                            await send_document_to_user(chat_id, str(failed_job.id), filename, db)
+                            return {"ok": True}
+
+                        # PDF not generated — re-trigger generation
                         answers = failed_job.answers if isinstance(failed_job.answers, dict) else {}
                         current_step = answers.get("_step")
                         finalize_step = "finalize" if failed_job.type in {"resume", "cv"} else "preview"
