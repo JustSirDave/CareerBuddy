@@ -467,19 +467,37 @@ async def handle_callback_query(callback_query: dict, db):
                     if len(parts) == 3:
                         await reply_text(chat_id, parts[2])
                     await send_document_type_menu(chat_id, "free")
+            elif reply and reply.startswith("__"):
+                await reply_text(
+                    chat_id,
+                    "⏳ Still working on that... or something may have gone wrong.\n\n"
+                    "Type /reset to start fresh or /help to see options.",
+                )
             elif reply:
                 await reply_text(chat_id, reply)
 
         elif data == "plan_premium":
             # User clicked "Start with Premium Plan"
             reply = await handle_inbound(db, str(chat_id), "/upgrade", telegram_username=username)
-            if reply:
+            if reply and reply.startswith("__"):
+                await reply_text(
+                    chat_id,
+                    "⏳ Still working on that... or something may have gone wrong.\n\n"
+                    "Type /reset to start fresh or /help to see options.",
+                )
+            elif reply:
                 await reply_text(chat_id, reply)
 
         elif data == "onboarding_continue":
             first_name = (from_user.get("first_name") or "").strip() or "there"
             reply = await handle_inbound(db, str(chat_id), "continue", telegram_username=username, first_name=first_name)
-            if reply:
+            if reply and reply.startswith("__"):
+                await reply_text(
+                    chat_id,
+                    "⏳ Still working on that... or something may have gone wrong.\n\n"
+                    "Type /reset to start fresh or /help to see options.",
+                )
+            elif reply:
                 await reply_text(chat_id, reply)
 
         elif data == "onboarding_start_fresh":
@@ -523,7 +541,13 @@ Ready to create? Type /start!"""
             # Document type selected
             doc_type = data.replace("doc_", "")
             reply = await handle_inbound(db, str(chat_id), doc_type, telegram_username=username)
-            if reply:
+            if reply and reply.startswith("__"):
+                await reply_text(
+                    chat_id,
+                    "⏳ Still working on that... or something may have gone wrong.\n\n"
+                    "Type /reset to start fresh or /help to see options.",
+                )
+            elif reply:
                 await reply_text(chat_id, reply)
 
         elif data.startswith("template_"):
@@ -553,6 +577,12 @@ Ready to create? Type /start!"""
                     parts = reply.split("|")
                     if len(parts) == 3:
                         await send_document_to_user(chat_id, parts[1], parts[2], db)
+                elif reply and reply.startswith("__"):
+                    await reply_text(
+                        chat_id,
+                        "⏳ Still working on that... or something may have gone wrong.\n\n"
+                        "Type /reset to start fresh or /help to see options.",
+                    )
                 elif reply:
                     await reply_text(chat_id, reply)
             else:
@@ -616,8 +646,41 @@ Ready to create? Type /start!"""
 
         elif data in ("confirm_yes", "confirm_no", "confirm_back"):
             text_map = {"confirm_yes": "yes", "confirm_no": "no", "confirm_back": "back"}
+
+            if data == "confirm_yes":
+                user = db.query(User).filter(User.telegram_user_id == str(chat_id)).first()
+                if user:
+                    failed_job = (
+                        db.query(Job)
+                        .filter(Job.user_id == user.id, Job.status == "render_failed")
+                        .order_by(Job.created_at.desc())
+                        .first()
+                    )
+                    if failed_job:
+                        await reply_text(chat_id, "🔄 Regenerating your document, please wait...")
+                        await send_typing_action(chat_id)
+                        gen_reply = await handle_inbound(db, str(chat_id), "retry", telegram_username=username)
+                        if gen_reply and gen_reply.startswith("__SEND_DOCUMENT__|"):
+                            parts = gen_reply.split("|")
+                            if len(parts) == 3:
+                                await send_document_to_user(chat_id, parts[1], parts[2], db)
+                        elif not gen_reply or gen_reply.startswith("__"):
+                            logger.error(f"[callback_query] Repeated render_failed for chat_id={chat_id} job_id={failed_job.id}")
+                            await reply_text(
+                                chat_id,
+                                "❌ Document generation failed again.\n\n"
+                                "This is likely a temporary issue. "
+                                "Please type /reset and try again in a moment.\n\n"
+                                "If this keeps happening, the team has been notified.",
+                            )
+                        else:
+                            await reply_text(chat_id, gen_reply)
+                        return {"ok": True}
+
             reply = await handle_inbound(db, str(chat_id), text_map[data], telegram_username=username)
-            if reply and reply.startswith("__CONFIRM_REVISION__|"):
+            if reply == "__SHOW_MENU__":
+                await send_choice_menu(chat_id)
+            elif reply and reply.startswith("__CONFIRM_REVISION__|"):
                 await send_revision_confirm_menu(chat_id, reply[len("__CONFIRM_REVISION__|"):])
             elif reply and reply.startswith("__CONFIRM__|"):
                 await send_confirm_menu(chat_id, reply[len("__CONFIRM__|"):])
@@ -631,6 +694,12 @@ Ready to create? Type /start!"""
                     if len(parts) == 3:
                         await reply_text(chat_id, parts[2])
                     await send_document_type_menu(chat_id, parts[1])
+            elif reply and reply.startswith("__"):
+                await reply_text(
+                    chat_id,
+                    "⏳ Still working on that... or something may have gone wrong.\n\n"
+                    "Type /reset to start fresh or /help to see options.",
+                )
             elif reply:
                 await reply_text(chat_id, reply)
 
