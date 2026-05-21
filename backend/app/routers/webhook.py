@@ -274,7 +274,12 @@ async def send_document_to_user(chat_id: int | str, job_id: str, filename: str, 
             await reply_text(chat_id, "❌ Sorry, your document could not be found. Please try again.")
             return
 
-        file_bytes = await storage.fetch_document_bytes(doc_url)
+        import httpx
+        async with httpx.AsyncClient(timeout=30) as client:
+            dl = await client.get(doc_url)
+            dl.raise_for_status()
+            file_bytes = dl.content
+        filename = doc_url.split("/")[-1] or filename
         send_resp = await send_document(chat_id, file_bytes, filename, caption="📄 *Your Document is Ready!*")
 
         if send_resp and not send_resp.get("error"):
